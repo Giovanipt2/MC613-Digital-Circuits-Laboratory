@@ -6,16 +6,18 @@ entity time_tb is
 end entity time_tb;
 
 architecture sim of time_tb is
-    -- Sinais para a UUT
+    -- Signals for the UUT
     signal clk            : std_logic := '0';
+    signal clk_enable     : std_logic := '0';            -- Enables the counter
     signal set_mode_pulse : std_logic := '0';
     signal set_value      : std_logic_vector(5 downto 0) := (others => '0');
+    signal control        : std_logic := '0';            -- Allows mode change
     signal hours          : std_logic_vector(6 downto 0);
     signal minutes        : std_logic_vector(6 downto 0);
     signal seconds        : std_logic_vector(6 downto 0);
     signal mode           : std_logic_vector(1 downto 0);
 
-    -- Constantes para os testes (valores em 6 bits)
+    -- Constants for the tests (6-bit values)
     constant VAL_HOURS_15    : std_logic_vector(5 downto 0) := "001111"; -- 15
     constant VAL_MINUTES_45  : std_logic_vector(5 downto 0) := "101101"; -- 45
     constant VAL_SECONDS_30  : std_logic_vector(5 downto 0) := "011110"; -- 30
@@ -24,12 +26,14 @@ architecture sim of time_tb is
 
 begin
     -----------------------------------------------------------------------------
-    -- UUT instantiation
+    -- UUT instantiation (including clk_enable and control)
     -----------------------------------------------------------------------------
     uut: entity work.time port map(
         clk            => clk,
+        clk_enable     => clk_enable,
         set_mode_pulse => set_mode_pulse,
         set_value      => set_value,
+        control        => control,
         hours          => hours,
         minutes        => minutes,
         seconds        => seconds,
@@ -37,7 +41,7 @@ begin
     );
 
     -----------------------------------------------------------------------------
-    -- Clock generation: período de 10 ns (cada ciclo equivale a 1 "segundo" no design)
+    -- Clock generation: 10 ns period (each cycle equals 1 "second" in the design)
     -----------------------------------------------------------------------------
     clk_process: process
     begin
@@ -47,7 +51,6 @@ begin
             clk <= '1';
             wait for 5 ns;
         end loop;
-        wait;
     end process clk_process;
 
     -----------------------------------------------------------------------------
@@ -55,54 +58,57 @@ begin
     -----------------------------------------------------------------------------
     stim_proc: process
     begin
-        -----------------------------------------------------------------------------
-        -- Modo Normal: Deixe o sistema contar por alguns ciclos para observar o rollover
-        -----------------------------------------------------------------------------
-        report "Normal Mode: Counting test";
-        wait for 100 ns;  -- 10 ciclos de clock
+        -- Activate counting and mode change
+        clk_enable <= '1';
+        control    <= '1';
+        wait for 20 ns;
 
         -----------------------------------------------------------------------------
-        -- Teste de mudança para Set Hours:
-        -- Aplica o valor a ser setado, espera 1 ciclo para estabilização e, somente
-        -- no ciclo seguinte, envia o pulso de mudança de modo.
+        -- Normal mode: allow counting to observe rollover
+        -----------------------------------------------------------------------------
+        report "Normal Mode: Counting test";
+        wait for 100 ns;  -- 10 clock cycles
+
+        -----------------------------------------------------------------------------
+        -- Test: change to Set Hours
         -----------------------------------------------------------------------------
         report "Test: Setting Hours to 15";
         set_value <= VAL_HOURS_15;
-        wait for 10 ns;  -- Espera um ciclo completo com o set_value já aplicado
+        wait for 10 ns;
         set_mode_pulse <= '1';
-        wait for 10 ns;  -- Pulso de 1 ciclo
+        wait for 10 ns;
         set_mode_pulse <= '0';
-        wait for 20 ns;  -- Aguarda 2 ciclos para que a mudança seja efetivada
+        wait for 20 ns;
 
         -----------------------------------------------------------------------------
-        -- Teste de mudança para Set Minutes:
+        -- Test: change to Set Minutes
         -----------------------------------------------------------------------------
         report "Test: Setting Minutes to 45";
         set_value <= VAL_MINUTES_45;
-        wait for 10 ns;   -- Estabiliza o set_value
-        set_mode_pulse <= '1';  -- Muda o modo (avança no ciclo, utilizando o valor anterior)
+        wait for 10 ns;
+        set_mode_pulse <= '1';
         wait for 10 ns;
         set_mode_pulse <= '0';
-        wait for 20 ns;   -- Aguarda a efetivação
+        wait for 20 ns;
 
         -----------------------------------------------------------------------------
-        -- Teste de mudança para Set Seconds:
+        -- Test: change to Set Seconds
         -----------------------------------------------------------------------------
         report "Test: Setting Seconds to 30";
         set_value <= VAL_SECONDS_30;
-        wait for 10 ns;   -- Estabiliza o set_value
-        set_mode_pulse <= '1';  -- Muda o modo para Set Seconds
+        wait for 10 ns;
+        set_mode_pulse <= '1';
         wait for 10 ns;
         set_mode_pulse <= '0';
-        wait for 20 ns;   -- Aguarda para efetivar a mudança
+        wait for 20 ns;
 
         -----------------------------------------------------------------------------
-        -- Teste de borda para os valores máximos
+        -- Edge test for maximum values
         -----------------------------------------------------------------------------
         report "Edge Test: Setting Hours to Maximum (23)";
         set_value <= VAL_MAX_HOURS;
         wait for 10 ns;
-        set_mode_pulse <= '1';  -- Avança o modo para Set Hours
+        set_mode_pulse <= '1';
         wait for 10 ns;
         set_mode_pulse <= '0';
         wait for 20 ns;
@@ -110,7 +116,7 @@ begin
         report "Edge Test: Setting Minutes to Maximum (59)";
         set_value <= VAL_MAX_MINSEC;
         wait for 10 ns;
-        set_mode_pulse <= '1';  -- Avança o modo para Set Minutes
+        set_mode_pulse <= '1';
         wait for 10 ns;
         set_mode_pulse <= '0';
         wait for 20 ns;
@@ -118,23 +124,19 @@ begin
         report "Edge Test: Setting Seconds to Maximum (59)";
         set_value <= VAL_MAX_MINSEC;
         wait for 10 ns;
-        set_mode_pulse <= '1';  -- Avança o modo para Set Seconds
+        set_mode_pulse <= '1';
         wait for 10 ns;
         set_mode_pulse <= '0';
         wait for 20 ns;
 
         -----------------------------------------------------------------------------
-        -- Ciclo completo de modos:
-        -- Dispara pulsos consecutivos para percorrer: Normal → Set Hours → Set Minutes → Set Seconds → Normal.
+        -- Complete mode cycle: Normal → Set H → Set M → Set S → Normal
         -----------------------------------------------------------------------------
         report "Test: Complete mode cycle";
-        set_mode_pulse <= '1'; wait for 10 ns; set_mode_pulse <= '0';
-        wait for 10 ns;
-        set_mode_pulse <= '1'; wait for 10 ns; set_mode_pulse <= '0';
-        wait for 10 ns;
-        set_mode_pulse <= '1'; wait for 10 ns; set_mode_pulse <= '0';
-        wait for 10 ns;
-        set_mode_pulse <= '1'; wait for 10 ns; set_mode_pulse <= '0';
+        for i in 1 to 4 loop
+            set_mode_pulse <= '1'; wait for 10 ns;
+            set_mode_pulse <= '0'; wait for 10 ns;
+        end loop;
         wait for 50 ns;
 
         report "Testbench simulation ended";
