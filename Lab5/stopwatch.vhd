@@ -4,9 +4,11 @@ use ieee.numeric_std.all;
 
 entity stopwatch is
     Port (
-        clk         : in  std_logic;  -- clock com período de 0,01s
+        clk         : in  std_logic;  -- Clock 50MHz
+        clk_enable  : in  std_logic;  -- habilita o funcionamento do cronômetro
         pause_start : in  std_logic;  -- borda de subida: alterna start/pausa
         reset       : in  std_logic;  -- ativo em '1': reseta o cronômetro
+        control     : in  std_logic;
         minutes     : out std_logic_vector(6 downto 0);  -- valores de 0 a 99
         seconds     : out std_logic_vector(6 downto 0);  -- valores de 0 a 59
         cent_secs   : out std_logic_vector(6 downto 0)   -- valores de 0 a 99 (centésimos)
@@ -23,39 +25,42 @@ begin
 
     process(clk, reset)
     begin
-        if reset = '1' then
+        if control = '1' and reset = '1' then
             running      <= '0';
             cent_counter <= 0;
             sec_counter  <= 0;
             min_counter  <= 0;
             previous_pause_start <= '0'; -- Reset previous_pause_start
         elsif rising_edge(clk) then
-            -- Check for pause_start edge
-            if (previous_pause_start = '0' and pause_start = '1') then
-                running <= not running;
-            end if;
-    
-            -- Update counters if running
-            if running = '1' then
-                if cent_counter = 99 then
-                    cent_counter <= 0;
-                    if sec_counter = 59 then
-                        sec_counter <= 0;
-                        if min_counter = 99 then
-                            min_counter <= 0;
+            if clk_enable = '1' then
+                -- Check for pause_start edge
+                if control = '1' and (previous_pause_start = '0' and pause_start = '1') then
+                    running <= not running;
+                end if;
+        
+                -- Update counters if running
+                if running = '1' then
+                    if cent_counter = 99 then
+                        cent_counter <= 0;
+                        if sec_counter = 59 then
+                            sec_counter <= 0;
+                            if min_counter = 99 then
+                                min_counter <= 0;
+                            else
+                                min_counter <= min_counter + 1;
+                            end if;
                         else
-                            min_counter <= min_counter + 1;
+                            sec_counter <= sec_counter + 1;
                         end if;
                     else
-                        sec_counter <= sec_counter + 1;
+                        cent_counter <= cent_counter + 1;
                     end if;
-                else
-                    cent_counter <= cent_counter + 1;
                 end if;
+                
+                -- Update previous_pause_start
+                previous_pause_start <= pause_start;
             end if;
-    
-            -- Update previous_pause_start
-            previous_pause_start <= pause_start;
+            
         end if;
     end process;
 

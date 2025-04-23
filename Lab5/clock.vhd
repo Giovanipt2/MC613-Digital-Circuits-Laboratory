@@ -5,7 +5,7 @@ use ieee.numeric_std.all;
 entity clock is
     port(
         CLOCK_50  : in std_logic;  -- 50 MHz clock input
-        SW        : in std_logic_vector(9 downto 0);  -- Switch input (controls the setting of the time), only uses SW(5 downto 0)
+        SW        : in std_logic_vector(9 downto 0);  -- Switch input (control_KEY2s the setting of the time), only uses SW(5 downto 0)
         KEY       : in std_logic_vector(3 downto 0);  -- Key input, only uses KEY(3 downto 1)
         -- KEY(3): change mode (time/stopwatch)
         -- KEY(2): pause/start (stopwatch) / set time (time)
@@ -22,13 +22,13 @@ end entity clock;
 
 architecture structural of clock is
     signal clock_1Hz          : std_logic := '0';  -- 1 Hz clock signal (used in time)
-    signal clock_2Hz          : std_logic := '0';  -- 2 Hz clock signal (used in time)
-    signal clock_50Hz        : std_logic := '0';  -- 100 Hz clock signal (used in stopwatch)
-    constant MAX_COUNT_1Hz    : integer := 24999999;  -- Count for 1Hz clock (50MHz / 2 - 1)
+    signal reg_2Hz            : std_logic := '0';  -- 2 Hz clock signal (used to blink when setting time)
+    signal clock_100Hz        : std_logic := '0';  -- 100 Hz clock signal (used in stopwatch)
+    constant MAX_COUNT_1Hz    : integer := 49999999;  -- Count for 1Hz clock (50MHz - 1)
     signal counter_1Hz        : integer range 0 to MAX_COUNT_1Hz := 0;  -- Counter for 1Hz clock
     constant MAX_COUNT_2Hz    : integer := 12499999;  -- Count for 2Hz clock (50MHz / 4 - 1)
     signal counter_2Hz        : integer range 0 to MAX_COUNT_2Hz := 0;  -- Counter for 2Hz clock
-    constant MAX_COUNT_100Hz  : integer := 249999;  -- Count for 100Hz clock (50MHz / 200 - 1)
+    constant MAX_COUNT_100Hz  : integer := 499999;  -- Count for 100Hz clock (50MHz / 100 - 1)
     signal counter_100Hz      : integer range 0 to MAX_COUNT_100Hz := 0;  -- Counter for 100Hz clock
     signal display_mode       : std_logic := '0';  -- 0 for time, 1 for stopwatch
     signal last_KEY3          : std_logic := '1';  -- Last state of KEY(3), '1' is not pressed
@@ -64,6 +64,7 @@ architecture structural of clock is
     signal sw_hex2            : std_logic_vector(6 downto 0);
     signal sw_hex1            : std_logic_vector(6 downto 0);
     signal sw_hex0            : std_logic_vector(6 downto 0);
+    signal control            : std_logic := '1';
 
 begin
     -- frequency divisor for 1Hz clock
@@ -72,9 +73,10 @@ begin
         if rising_edge(CLOCK_50) then
             if counter_1Hz = MAX_COUNT_1Hz then
                 counter_1Hz <= 0;
-                clock_1Hz <= not clock_1Hz;
+                clock_1Hz <= '1';
             else
                 counter_1Hz <= counter_1Hz + 1;
+                clock_1Hz <= '0';
             end if;
         end if;
     end process;
@@ -85,7 +87,7 @@ begin
         if rising_edge(CLOCK_50) then
             if counter_2Hz = MAX_COUNT_2Hz then
                 counter_2Hz <= 0;
-                clock_2Hz <= not clock_2Hz;
+                reg_2Hz <= not reg_2Hz;
             else
                 counter_2Hz <= counter_2Hz + 1;
             end if;
@@ -98,9 +100,10 @@ begin
         if rising_edge(CLOCK_50) then
             if counter_100Hz = MAX_COUNT_100Hz then
                 counter_100Hz <= 0;
-                clock_50Hz <= not clock_50Hz;
+                clock_100Hz <= '1';
             else
                 counter_100Hz <= counter_100Hz + 1;
+                clock_100Hz <= '0';
             end if;
         end if;
     end process;
@@ -111,6 +114,7 @@ begin
         if rising_edge(CLOCK_50) then
             if last_KEY3 = '1' and KEY(3) = '0' then
                 display_mode <= not display_mode;  -- toggle mode
+                control <= not control;  -- toggle control signal
             end if;
             last_KEY3 <= KEY(3);  -- update last state
         end if;
@@ -119,9 +123,11 @@ begin
     -- instantiation of entity time
     time_inst: entity work.time
         port map(
-            clk            => clock_1Hz,
+            clk            => CLOCK_50,
+            clk_enable     => clock_1Hz,
             set_mode_pulse => not KEY(2),
             set_value      => SW(5 downto 0),
+            control        => control,
             hours          => time_hours,
             minutes        => time_minutes,
             seconds        => time_seconds,
@@ -131,9 +137,11 @@ begin
     -- instantiation of entity stopwatch
     sw_inst: entity work.stopwatch
         port map(
-            clk         => clock_50Hz,
+            clk         => CLOCK_50,
+            clk_enable  => clock_100Hz,
             pause_start => not KEY(2),
             reset       => not KEY(1),
+            control     => not control,
             minutes     => sw_minutes,
             seconds     => sw_seconds,
             cent_secs   => sw_cent_secs
@@ -170,16 +178,57 @@ begin
 
     process(CLOCK_50)
     begin
-        if display_mode = '0' then -- time mode
-            -- blinking display for when time is being set
-            if time_mode = "01" then
-                if clock_2Hz = '1' then
-                    HEX5 <= BLANK;
-                    HEX4 <= BLANK;
-                    HEX3 <= time_hex3;
-                    HEX2 <= time_hex2;
-                    HEX1 <= time_hex1;
-                    HEX0 <= time_hex0;
+        if rising_edge(CLOCK_50) then
+            if display_mode = '0' then -- time mode
+                -- blinking display for when time is being set
+                if time_mode = "01" then
+                    if reg_2Hz = '1' then
+                        HEX5 <= BLANK;
+                        HEX4 <= BLANK;
+                        HEX3 <= time_hex3;
+                        HEX2 <= time_hex2;
+                        HEX1 <= time_hex1;
+                        HEX0 <= time_hex0;
+                    else
+                        HEX5 <= time_hex5;
+                        HEX4 <= time_hex4;
+                        HEX3 <= time_hex3;
+                        HEX2 <= time_hex2;
+                        HEX1 <= time_hex1;
+                        HEX0 <= time_hex0;
+                    end if;
+                elsif time_mode = "10" then
+                    if reg_2Hz = '1' then
+                        HEX5 <= time_hex5;
+                        HEX4 <= time_hex4;
+                        HEX3 <= BLANK;
+                        HEX2 <= BLANK;
+                        HEX1 <= time_hex1;
+                        HEX0 <= time_hex0;
+                    else
+                        HEX5 <= time_hex5;
+                        HEX4 <= time_hex4;
+                        HEX3 <= time_hex3;
+                        HEX2 <= time_hex2;
+                        HEX1 <= time_hex1;
+                        HEX0 <= time_hex0;
+                    end if;
+                elsif time_mode = "11" then
+                    if reg_2Hz = '1' then
+                        HEX5 <= time_hex5;
+                        HEX4 <= time_hex4;
+                        HEX3 <= time_hex3;
+                        HEX2 <= time_hex2;
+                        HEX1 <= BLANK;
+                        HEX0 <= BLANK;
+                    else
+                        HEX5 <= time_hex5;
+                        HEX4 <= time_hex4;
+                        HEX3 <= time_hex3;
+                        HEX2 <= time_hex2;
+                        HEX1 <= time_hex1;
+                        HEX0 <= time_hex0;
+                    end if;
                 else
                     HEX5 <= time_hex5;
                     HEX4 <= time_hex4;
@@ -188,53 +237,14 @@ begin
                     HEX1 <= time_hex1;
                     HEX0 <= time_hex0;
                 end if;
-            elsif time_mode = "10" then
-                if clock_2Hz = '1' then
-                    HEX5 <= time_hex5;
-                    HEX4 <= time_hex4;
-                    HEX3 <= BLANK;
-                    HEX2 <= BLANK;
-                    HEX1 <= time_hex1;
-                    HEX0 <= time_hex0;
-                else
-                    HEX5 <= time_hex5;
-                    HEX4 <= time_hex4;
-                    HEX3 <= time_hex3;
-                    HEX2 <= time_hex2;
-                    HEX1 <= time_hex1;
-                    HEX0 <= time_hex0;
-                end if;
-            elsif time_mode = "11" then
-                if clock_2Hz = '1' then
-                    HEX5 <= time_hex5;
-                    HEX4 <= time_hex4;
-                    HEX3 <= time_hex3;
-                    HEX2 <= time_hex2;
-                    HEX1 <= BLANK;
-                    HEX0 <= BLANK;
-                else
-                    HEX5 <= time_hex5;
-                    HEX4 <= time_hex4;
-                    HEX3 <= time_hex3;
-                    HEX2 <= time_hex2;
-                    HEX1 <= time_hex1;
-                    HEX0 <= time_hex0;
-                end if;
-            else
-                HEX5 <= time_hex5;
-                HEX4 <= time_hex4;
-                HEX3 <= time_hex3;
-                HEX2 <= time_hex2;
-                HEX1 <= time_hex1;
-                HEX0 <= time_hex0;
+            else -- stopwatch mode
+                HEX5 <= sw_hex5;
+                HEX4 <= sw_hex4;
+                HEX3 <= sw_hex3;
+                HEX2 <= sw_hex2;
+                HEX1 <= sw_hex1;
+                HEX0 <= sw_hex0;
             end if;
-        else -- stopwatch mode
-            HEX5 <= sw_hex5;
-            HEX4 <= sw_hex4;
-            HEX3 <= sw_hex3;
-            HEX2 <= sw_hex2;
-            HEX1 <= sw_hex1;
-            HEX0 <= sw_hex0;
         end if;
     end process;
 
