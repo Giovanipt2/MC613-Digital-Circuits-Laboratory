@@ -5,13 +5,13 @@ use ieee.numeric_std.all;
 entity stopwatch is
     Port (
         clk         : in  std_logic;  -- Clock 50MHz
-        clk_enable  : in  std_logic;  -- habilita o funcionamento do cronômetro
-        pause_start : in  std_logic;  -- borda de subida: alterna start/pausa
-        reset       : in  std_logic;  -- ativo em '1': reseta o cronômetro
-        control     : in  std_logic;
-        minutes     : out std_logic_vector(6 downto 0);  -- valores de 0 a 99
-        seconds     : out std_logic_vector(6 downto 0);  -- valores de 0 a 59
-        cent_secs   : out std_logic_vector(6 downto 0)   -- valores de 0 a 99 (centésimos)
+        clk_enable  : in  std_logic;  -- Enable signal for the stopwatch
+        pause_start : in  std_logic;  -- Rising edge: alternates start/pause
+        reset       : in  std_logic;  -- Active in '1': resets the stopwatch
+        control     : in  std_logic;  -- Control signal: if control = '1', mode on clock is stopwatch
+        minutes     : out std_logic_vector(6 downto 0);  -- values from 0 to 99
+        seconds     : out std_logic_vector(6 downto 0);  -- values from 0 to 99
+        cent_secs   : out std_logic_vector(6 downto 0)   -- values from 0 to 99 (centisseconds)
     );
 end stopwatch;
 

@@ -8,7 +8,7 @@ entity time is
         clk_enable      : in  std_logic;                             -- Enable signal for the clock
         set_mode_pulse  : in  std_logic;                             -- Single pulse on KEY[2] press (debounced)
         set_value       : in  std_logic_vector(5 downto 0);          -- Value from SW[5..0] for setting time
-        control         : in  std_logic;
+        control         : in  std_logic;                             -- Control signal: if control = '1', mode on clock is time
         hours           : out std_logic_vector(6 downto 0);          -- Current hours (0-23)
         minutes         : out std_logic_vector(6 downto 0);          -- Current minutes (0-59)
         seconds         : out std_logic_vector(6 downto 0);          -- Current seconds (0-59)
