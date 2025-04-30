@@ -6,8 +6,10 @@ entity uart is
     port (
         -- System Clocks
         clk         : in  std_logic; -- 50 MHz main clock
-        clk_enable  : in  std_logic; -- 9600 Hz enable signal (bit clock)
 
+        -- reset signal
+        reset       : in  std_logic; -- Active high reset
+        
         -- Transmitter Interface
         data        : in  std_logic_vector(7 downto 0); -- Data to be sent
         send_data   : in  std_logic; -- Trigger signal to start transmission
@@ -20,7 +22,13 @@ entity uart is
 end entity uart;
 
 architecture behavioral of uart is
-
+    signal clk_tx      : std_logic := '0';
+    signal clk_rx      : std_logic := '0';
+    signal counter_rx_set_2499 : std_logic := '0'; -- Flag to reset counter at the middle of the bit time
+    signal MAX_COUNT_10KHz  : integer := 4999;
+    signal counter_tx    : integer range 0 to MAX_COUNT_10KHz := 0;
+    signal MAX_COUNT_RX     : integer := 2499;
+    signal counter_rx       : integer range 0 to MAX_COUNT_RX := 0;
     -- == Transmitter Types and Signals ==
     type tx_state_type is (
         TX_IDLE,
@@ -33,7 +41,7 @@ architecture behavioral of uart is
     signal tx_data_reg      : std_logic_vector(7 downto 0) := (others => '0');
     signal tx_parity_bit    : std_logic := '0';
     signal tx_bit_count     : integer range 0 to 7 := 0; -- Counter for data bits
-    signal tx_shift_reg     : std_logic_vector(9 downto 0) := (others => '0'); -- 1 start + 8 data + 1 parity
+    signal tx_shift_reg     : std_logic_vector(10 downto 0) := (others => '0'); -- 1 start + 8 data + 1 parity + 1 stop
     signal tx_busy          : std_logic := '0'; -- Internal flag to avoid re-triggering during send
 
     -- == Receiver Types and Signals ==
@@ -51,7 +59,7 @@ architecture behavioral of uart is
     signal rx_shift_reg     : std_logic_vector(9 downto 0) := (others => '0'); -- Buffer for start + data + parity
     signal rx_parity_error  : std_logic := '0';
     signal rx_data_output   : std_logic_vector(7 downto 0) := (others => '0'); -- Internal buffer for output
-
+    signal rx_is_counting   : std_logic := '0'; -- Flag to indicate if RX is counting bits
 
     -- Function to calculate even parity
     function calculate_even_parity (data_in : std_logic_vector(7 downto 0)) return std_logic is
@@ -67,6 +75,35 @@ architecture behavioral of uart is
     end function calculate_even_parity;
 
 begin
+    -- frequency divisor for 10KHz clock for receiving
+    process(clk)
+    begin
+        if rising_edge(clk)  then
+            if counter_tx =  MAX_COUNT_10KHz then
+                counter_tx <= 0;
+                clk_tx <= '1';
+            else
+                counter_tx <= counter_tx + 1;
+                clk_tx <= '0';
+            end if;
+        end if;
+    end process;
+
+    -- frequency divisor for 10KHz clock for receiving
+    process(clk)
+    begin
+        if rising_edge(clk) and rx_is_counting = '1' then
+            if counter_rx_set_2499 = '1' then
+                counter_rx <= 2499; -- Reset counter at the middle of the bit time
+            elsif counter_rx =  MAX_COUNT_RX then
+                counter_rx <= 0;
+                clk_rx <= '1';
+            else
+                counter_rx <= counter_rx + 1;
+                clk_rx <= '0';
+            end if;
+        end if;
+    end process;
 
     -- Default TX to IDLE state ('1')
     TX <= '1' when tx_state = TX_IDLE else tx_shift_reg(0); -- Output LSB of shift register during transmission
@@ -78,7 +115,7 @@ begin
     tx_process : process(clk)
     begin
         if rising_edge(clk) then
-            if clk_enable = '1' then
+            if clk_tx = '1' then
                 case tx_state is
                     when TX_IDLE => -- Idle state
                         tx_busy <= '0'; -- Not busy anymore
@@ -87,7 +124,7 @@ begin
                             tx_parity_bit <= calculate_even_parity(data);
                             -- Load shift register: stop(0), parity, data(7..0), start(0)
                             -- Note: We shift LSB out first. Stop bit is loaded last but shifted out first.
-                            tx_shift_reg  <= calculate_even_parity(data) & data & '0';
+                            tx_shift_reg  <= '0' & calculate_even_parity(data) & data & '0';
                             tx_bit_count  <= 0; -- Reset bit counter
                             tx_state      <= TX_START_BIT;
                             tx_busy       <= '1'; -- Set busy flag
@@ -98,12 +135,12 @@ begin
                     when TX_START_BIT => -- Start bit ('0') is now in tx_shift_reg(0)
                         -- Start bit ('0') is already in tx_shift_reg(0)
                         -- Shift register one position to the right (prepare data bit 0)
-                        tx_shift_reg <= '1' & tx_shift_reg(9 downto 1); -- Shift in '1' (idle) at MSB
+                        tx_shift_reg <= '1' & tx_shift_reg(10 downto 1); -- Shift in '1' (idle) at MSB
                         tx_state     <= TX_DATA_BITS;
 
                     when TX_DATA_BITS =>
                         -- Current data bit is in tx_shift_reg(0)
-                        tx_shift_reg <= '1' & tx_shift_reg(9 downto 1); -- Shift right
+                        tx_shift_reg <= '1' & tx_shift_reg(10 downto 1); -- Shift right
                         if tx_bit_count < 7 then
                             tx_bit_count <= tx_bit_count + 1;
                             tx_state     <= TX_DATA_BITS;
@@ -114,20 +151,20 @@ begin
 
                     when TX_PARITY_BIT_ST =>
                         -- Parity bit is now in tx_shift_reg(0)
-                        tx_shift_reg <= '1' & tx_shift_reg(9 downto 1); -- Shift right
+                        tx_shift_reg <= '1' & tx_shift_reg(10 downto 1); -- Shift right
                         tx_state     <= TX_STOP_BIT;
 
                     when TX_STOP_BIT =>
                         -- Stop bit ('0') is now in tx_shift_reg(0)
-                        tx_shift_reg <= '1' & tx_shift_reg(9 downto 1); -- Shift right (back to idle state)
+                        tx_shift_reg <= '1' & tx_shift_reg(10 downto 1); -- Shift right (back to idle state)
                         tx_state     <= TX_IDLE; -- Return to IDLE after stop bit
-                        -- tx_busy remains '1' until IDLE is entered on next clk_enable cycle
+                        -- tx_busy remains '1' until IDLE is entered on next clk_tx cycle
 
                     when others => -- Should not happen
                          tx_state <= TX_IDLE;
 
                 end case;
-            end if; -- clk_enable check
+            end if; -- clk_tx check
         end if; -- rising_edge(clk) check
     end process tx_process;
 
@@ -137,19 +174,29 @@ begin
         variable calculated_parity : std_logic;
     begin
         if rising_edge(clk) then
-             -- Latch RX input synchronously with main clock for better metastability handling (optional but good practice)
-            -- We will sample based on clk_enable anyway
-            -- signal rx_synced : std_logic;
-            -- rx_synced <= RX;
+            if reset = '1' then
+                rx_state         <= RX_IDLE;
+                rx_bit_count     <= 0;
+                rx_data_reg      <= (others => '0');
+                rx_received_parity <= '0';
+                rx_parity_error  <= '0';
+                rx_data_output   <= (others => '0');
+                rx_is_counting   <= '0';
+            end if;
 
-            if clk_enable = '1' then -- Sample RX only at the bit rate
+            if counter_rx_set_2499 = '1' then
+                counter_rx_set_2499 <= '0'; -- Reset counter at the middle of the bit time
+            end if;
+        
+            if clk_rx = '1' then -- Sample RX only at the bit rate
                 case rx_state is
                     when RX_IDLE =>
-                        rx_parity_error <= '0'; -- Clear error flag
-                        if RX = '0' then -- Detect potential start bit (transition 1 -> 0)
+                        if RX = '0' then -- Start bit detected
+                            rx_is_counting <= '1'; -- Start counting
+                            counter_rx_set_2499 <= '1'; -- Reset counter at the middle of the bit time
                             rx_state <= RX_START_BIT;
                         else
-                            rx_state <= RX_IDLE;
+                            rx_state <= RX_IDLE; -- Stay in idle if no start bit
                         end if;
 
                     when RX_START_BIT =>
@@ -158,6 +205,7 @@ begin
                             rx_state <= RX_DATA_BITS;
                         else -- Glitch or noise, go back to idle
                             rx_state <= RX_IDLE;
+                            rx_is_counting <= '0'; -- Stop counting
                         end if;
 
                     when RX_DATA_BITS =>
@@ -177,6 +225,7 @@ begin
 
                     when RX_STOP_BIT =>
                         if RX = '0' then -- Check for valid stop bit ('0' as per spec)
+                            rx_is_counting <= '0'; -- Stop counting
                             -- Check Parity
                             calculated_parity := calculate_even_parity(rx_data_reg);
                             if calculated_parity = rx_received_parity then
