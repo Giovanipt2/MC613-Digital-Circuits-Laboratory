@@ -27,8 +27,8 @@ architecture behavioral of uart is
     signal counter_rx_set_2499 : std_logic := '0'; -- Flag to reset counter at the middle of the bit time
     signal MAX_COUNT_10KHz  : integer := 4999;
     signal counter_tx    : integer range 0 to MAX_COUNT_10KHz := 0;
-    signal MAX_COUNT_RX     : integer := 2499;
-    signal counter_rx       : integer range 0 to MAX_COUNT_RX := 0;
+    signal MAX_COUNT_RX     : integer := 4999;
+    signal counter_rx       : integer range 0 to MAX_COUNT_10KHz := 0;
     -- == Transmitter Types and Signals ==
     type tx_state_type is (
         TX_IDLE,
@@ -60,6 +60,7 @@ architecture behavioral of uart is
     signal rx_parity_error  : std_logic := '0';
     signal rx_data_output   : std_logic_vector(7 downto 0) := (others => '0'); -- Internal buffer for output
     signal rx_is_counting   : std_logic := '0'; -- Flag to indicate if RX is counting bits
+    signal last_RX          : std_logic := '1'; -- Last value of RX line
 
     -- Function to calculate even parity
     function calculate_even_parity (data_in : std_logic_vector(7 downto 0)) return std_logic is
@@ -168,6 +169,13 @@ begin
         end if; -- rising_edge(clk) check
     end process tx_process;
 
+    -- last_RX process
+    process(clk)
+    begin
+        if rising_edge(clk) then
+            last_RX <= RX; -- Store the last value of RX
+        end if;
+    end process;
 
     -- == Receiver Process ==
     rx_process : process(clk)
@@ -187,13 +195,18 @@ begin
             if counter_rx_set_2499 = '1' then
                 counter_rx_set_2499 <= '0'; -- Reset counter at the middle of the bit time
             end if;
+            
+            -- RX is counting when RX goes low (start bit)
+            if last_RX = '1' and RX = '0' and rx_state = RX_IDLE then
+                rx_is_counting <= '1'; -- Start counting when RX is low (start bit)
+                counter_rx_set_2499 <= '1';
+                rx_state <= RX_START_BIT; -- Move to start bit state
+            end if;
         
             if clk_rx = '1' then -- Sample RX only at the bit rate
                 case rx_state is
                     when RX_IDLE =>
                         if RX = '0' then -- Start bit detected
-                            rx_is_counting <= '1'; -- Start counting
-                            counter_rx_set_2499 <= '1'; -- Reset counter at the middle of the bit time
                             rx_state <= RX_START_BIT;
                         else
                             rx_state <= RX_IDLE; -- Stay in idle if no start bit
@@ -204,8 +217,7 @@ begin
                             rx_bit_count <= 0;
                             rx_state <= RX_DATA_BITS;
                         else -- Glitch or noise, go back to idle
-                            rx_state <= RX_IDLE;
-                            rx_is_counting <= '0'; -- Stop counting
+                            rx_state <= RX_DATA_BITS;
                         end if;
 
                     when RX_DATA_BITS =>
