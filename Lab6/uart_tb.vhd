@@ -2,101 +2,108 @@ library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
 
-
 entity uart_tb is
--- testbench sem portas
-end entity;
+end entity uart_tb;
 
-architecture tb of uart_tb is
-    impure function to_hstring(v : std_logic_vector) return string is
-        constant hexmap : string := "0123456789ABCDEF";
-        variable nibs   : integer := v'length / 4;
-        variable res    : string(1 to nibs);
-        variable idx    : integer;
-    begin
-        for i in 0 to nibs-1 loop
-            idx := to_integer(unsigned(v(v'left - i*4 downto v'left - i*4 - 3)));
-            res(i+1) := hexmap(idx+1);
-        end loop;
-        return res;
-    end function;
-    
-    -- sinalização do DUT
+architecture behavior of uart_tb is
+
+    -- DUT signals
     signal clk         : std_logic := '0';
     signal reset       : std_logic := '1';
-    signal data        : std_logic_vector(7 downto 0) := (others=>'0');
+    signal data_in     : std_logic_vector(7 downto 0) := (others => '0');
     signal send_data   : std_logic := '0';
-    signal TX          : std_logic;
-    signal RX          : std_logic;
-    signal received_bits : std_logic_vector(7 downto 0);
+    signal tx_line     : std_logic;
+    signal rx_line     : std_logic;
+    signal received    : std_logic_vector(7 downto 0);
 
-    -- componente UART
-    component uart
-        port (
-            clk           : in  std_logic;
-            reset         : in  std_logic;
-            data          : in  std_logic_vector(7 downto 0);
-            send_data     : in  std_logic;
-            TX            : out std_logic;
-            RX            : in  std_logic;
-            received_bits : out std_logic_vector(7 downto 0)
-        );
-    end component;
+    -- Test parameters
+    constant CLK_PERIOD    : time := 20 ns;        -- 50 MHz clock
+    constant BIT_PERIOD    : time := 100000 ns;    -- 50 µs per bit (≈10 kHz)
+    constant FRAME_PERIOD  : time := BIT_PERIOD * 11; -- 11 bits/frame
 
-    -- Bit time (100 µs) × 11 bits ≈ 1.1 ms
-    constant FRAME_TIME : time := 1 ms + 100 us;
+    -- Test vectors
+    type byte_array is array (natural range <>) of std_logic_vector(7 downto 0);
+    constant TEST_BYTES    : byte_array := (
+        x"55", x"AA", x"FF", x"3C"
+    );
 
 begin
 
-    -- Instancia DUT
-    DUT: uart
+    -----------------------------------------------------------------------------
+    -- Instantiate UART
+    -----------------------------------------------------------------------------
+    uut: entity work.uart
         port map (
             clk           => clk,
             reset         => reset,
-            data          => data,
+            data          => data_in,
             send_data     => send_data,
-            TX            => TX,
-            RX            => TX,            -- loop-back
-            received_bits => received_bits
+            TX            => tx_line,
+            RX            => rx_line,
+            received_bits => received
         );
 
-    -- clock 50 MHz
-    clk_proc: process is
+    -----------------------------------------------------------------------------
+    -- Clock generation (50 MHz)
+    -----------------------------------------------------------------------------
+    clk_proc: process
     begin
-        clk <= '0'; wait for 10 ns;
-        clk <= '1'; wait for 10 ns;
+        while true loop
+            clk <= '0'; wait for CLK_PERIOD/2;
+            clk <= '1'; wait for CLK_PERIOD/2;
+        end loop;
     end process;
 
-    -- estímulos
-    stim_proc: process
-        type byte_array is array (natural range <>) of std_logic_vector(7 downto 0);
-        constant vectors : byte_array := (
-            x"55", x"AA", x"FF", x"00"
-        );
+    -----------------------------------------------------------------------------
+    -- Reset pulse
+    -----------------------------------------------------------------------------
+    reset_proc: process
     begin
-        -- reset
+        reset <= '1';
         wait for 100 ns;
         reset <= '0';
         wait for 100 ns;
-
-        for i in vectors'range loop
-            data      <= vectors(i);
-            send_data <= '1';
-            wait for 20 ns;        -- um pulso de start
-            send_data <= '0';
-
-            wait for FRAME_TIME;   -- aguarda a frame completa
-
-            -- checa recebimento
-            assert received_bits = vectors(i)
-                report "FAIL: enviado " & to_hstring(vectors(i))
-                       & " recebeu " & to_hstring(received_bits)
-                       severity error;
-            report "PASS: " & to_hstring(vectors(i)) severity note;
-        end loop;
-
-        -- encerra simulação
         wait;
     end process;
 
-end architecture;
+    -----------------------------------------------------------------------------
+    -- Loopback test: send bytes and check reception
+    -----------------------------------------------------------------------------
+    -- Loopback: wire TX to RX
+    rx_line   <= tx_line;
+    loopback_proc: process
+    begin
+        -- Wait for reset release
+        wait until reset = '0';
+
+
+        for i in TEST_BYTES'range loop
+            wait for 5*BIT_PERIOD;  -- Wait for idle line
+            -- Apply data and trigger transmission
+            data_in   <= TEST_BYTES(i);
+            wait until rising_edge(clk);
+            send_data <= '1';
+            -- wait for 2499 cloks
+            wait for BIT_PERIOD - CLK_PERIOD;
+            send_data <= '0';
+
+
+            -- Wait full frame time for receipt
+            wait for FRAME_PERIOD + BIT_PERIOD;  -- extra bit for safety
+
+            -- Check received byte
+            assert received = TEST_BYTES(i)
+                report "Loopback test failed for byte " & integer'image(i)
+                       severity error;
+
+            -- Small pause before next
+            wait for 5*BIT_PERIOD;
+        end loop;
+
+        report "Loopback tests passed." severity note;
+
+        wait for 2 ms;  -- Wait before parity‐error test
+        wait;
+    end process;
+
+end architecture behavior;
