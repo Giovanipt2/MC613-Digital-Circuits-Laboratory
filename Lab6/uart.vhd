@@ -25,9 +25,9 @@ architecture behavioral of uart is
     signal clk_tx      : std_logic := '0';
     signal clk_rx      : std_logic := '0';
     signal counter_rx_set_2499 : std_logic := '0'; -- Flag to reset counter at the middle of the bit time
-    signal MAX_COUNT_10KHz  : integer := 4999;
+    signal MAX_COUNT_10KHz  : integer := 5207; --5207 if we want 9.6KHz
     signal counter_tx    : integer range 0 to MAX_COUNT_10KHz := 0;
-    signal MAX_COUNT_RX     : integer := 4999;
+    signal MAX_COUNT_RX     : integer := 5207;
     signal counter_rx       : integer range 0 to MAX_COUNT_10KHz := 0;
     -- == Transmitter Types and Signals ==
     type tx_state_type is (
@@ -61,6 +61,7 @@ architecture behavioral of uart is
     signal rx_data_output   : std_logic_vector(7 downto 0) := (others => '0'); -- Internal buffer for output
     signal rx_is_counting   : std_logic := '0'; -- Flag to indicate if RX is counting bits
     signal last_RX          : std_logic := '1'; -- Last value of RX line
+    signal last_send_data   : std_logic := '0'; -- Last value of send_data line
 
     -- Function to calculate even parity
     function calculate_even_parity (data_in : std_logic_vector(7 downto 0)) return std_logic is
@@ -120,12 +121,12 @@ begin
                 case tx_state is
                     when TX_IDLE => -- Idle state
                         tx_busy <= '0'; -- Not busy anymore
-                        if send_data = '1' and tx_busy = '0' then -- Start transmission on request if not busy
+                        if send_data = '1' and tx_busy = '0' then
                             tx_data_reg   <= data;
                             tx_parity_bit <= calculate_even_parity(data);
-                            -- Load shift register: stop(0), parity, data(7..0), start(0)
-                            -- Note: We shift LSB out first. Stop bit is loaded last but shifted out first.
-                            tx_shift_reg  <= '0' & calculate_even_parity(data) & data & '0';
+                            -- Load shift register: stop(1), parity, data(7..0), start(0)
+                            -- Note: We shift LSB out first.
+                            tx_shift_reg  <= '1' & calculate_even_parity(data) & data & '0';
                             tx_bit_count  <= 0; -- Reset bit counter
                             tx_state      <= TX_START_BIT;
                             tx_busy       <= '1'; -- Set busy flag
@@ -156,7 +157,7 @@ begin
                         tx_state     <= TX_STOP_BIT;
 
                     when TX_STOP_BIT =>
-                        -- Stop bit ('0') is now in tx_shift_reg(0)
+                        -- Stop bit ('1') is now in tx_shift_reg(0)
                         tx_shift_reg <= '1' & tx_shift_reg(10 downto 1); -- Shift right (back to idle state)
                         tx_state     <= TX_IDLE; -- Return to IDLE after stop bit
                         -- tx_busy remains '1' until IDLE is entered on next clk_tx cycle
@@ -177,11 +178,13 @@ begin
         end if;
     end process;
 
+
     -- == Receiver Process ==
     rx_process : process(clk)
         variable calculated_parity : std_logic;
     begin
         if rising_edge(clk) then
+            -- Reset all signals on reset
             if reset = '1' then
                 rx_state         <= RX_IDLE;
                 rx_bit_count     <= 0;
@@ -236,7 +239,7 @@ begin
                         rx_state <= RX_STOP_BIT;
 
                     when RX_STOP_BIT =>
-                        if RX = '0' then -- Check for valid stop bit ('0' as per spec)
+                        if RX = '1' then -- Check for valid stop bit ('0' as per spec)
                             rx_is_counting <= '0'; -- Stop counting
                             -- Check Parity
                             calculated_parity := calculate_even_parity(rx_data_reg);
@@ -246,18 +249,21 @@ begin
                                 rx_parity_error <= '0';
                             else
                                 -- Parity Error
-                                rx_data_output  <= (others => '0'); -- Output all zeros
-                                rx_parity_error <= '1';
+                                rx_data_output  <= rx_data_reg; -- Output received data
+                                rx_parity_error <= '1'; -- Indicate error
                             end if;
                         else
-                            -- Framing Error (Stop bit was not '0') - Also treat as error
-                            rx_data_output  <= (others => '0'); -- Output all zeros
-                            rx_parity_error <= '1'; -- Indicate error (though not specifically requested, good practice)
+                            rx_is_counting <= '0'; -- Stop counting
+                            -- Framing Error (Stop bit was not '1') - Also treat as error
+                            rx_data_output  <= rx_data_reg; -- Output all zeros
+                            rx_parity_error <= '1'; -- Indicate error
                         end if;
                         rx_state <= RX_IDLE; -- Ready for next frame
+                        rx_data_reg <= (others => '0'); -- Clear data register
 
                     when others => -- Should not happen
                         rx_state <= RX_IDLE;
+                        rx_data_reg <= (others => '0');
 
                 end case;
             end if; -- clk_enable check
