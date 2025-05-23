@@ -76,19 +76,23 @@ begin
       wait for CLK_PERIOD;
     end loop;
     WRITE <= '0';
-    wait for CLK_PERIOD;
+    wait for 5*CLK_PERIOD;
 
     ------------------------------------------------------------------------
     -- Reading: HIT (valid = 1 and TAG matches)
     ------------------------------------------------------------------------
+    wait for 5*CLK_PERIOD;
     report "==== Leitura com HIT esperado ====";
     for index in 0 to 15 loop
       tag := std_logic_vector(to_unsigned(index, TAG_WIDTH));
-      addr_t := tag & std_logic_vector(to_unsigned(index, 4)) & "00"; -- Mesma tag usada na escrita
+      addr_t := tag & std_logic_vector(to_unsigned(index, 4)) & "00"; -- Same TAG as written
       ADDR <= addr_t;
       wait for CLK_PERIOD;
       assert HIT = '1'
         report "Erro: Esperava HIT = 1 na linha " & integer'image(index)
+        severity error;
+      assert DATA_OUT = std_logic_vector(to_unsigned(index * 100, DATA_WIDTH))
+        report "Erro: Esperava HIT = 1 e dado = " & integer'image(index * 100) & " na linha " & integer'image(index)
         severity error;
     end loop;
 
