@@ -19,6 +19,9 @@
 -- Aproveitamento de espaço da cache (capacidade/espaço total): aproximadamente 74.4%
 -- Justificativa:
 --   Aproveitamento de espaço = C / S = 64 / 86 ≈ 0.744 ≃ 74.4%
+library ieee;
+use ieee.std_logic_1164.all;
+use ieee.numeric_std.all;
 
 entity INNER_CACHE is
   generic(
