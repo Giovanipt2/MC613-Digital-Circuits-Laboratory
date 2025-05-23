@@ -57,7 +57,7 @@ architecture Behavioral of OUTER_CACHE is
   signal inner_write    : std_logic;
 
   -- Máquina de estados
-  type state_type is (IDLE, SEARCH);
+  type state_type is (IDLE, INNER, SEARCH);
   signal state : state_type := IDLE;
 
   -- Sinal auxiliar para detectar borda de subida em start_search_for_data
@@ -100,20 +100,27 @@ begin
           if start_search_for_data = '1' and prev_start_search = '0' then
             -- Passar o endereço da CPU para a INNER_CACHE
             inner_addr <= C_ADDR_IN;
-
-            -- Após um ciclo, HIT será atualizado pela INNER_CACHE
-            -- No próximo ciclo, avaliamos o resultado
-            if inner_hit = '1' then
-              -- Caso 1: HIT na INNER_CACHE
-              C_DATA_OUT <= inner_data_out;
-              data_found <= '1';
-            else
-              -- Caso 2: MISS na INNER_CACHE
-              state       <= SEARCH;
-              M_ADDR_OUT  <= C_ADDR_IN;
-              search_deeper <= '1';
-            end if;
+            -- Aguardar resposta da INNER_CACHE
+            state <= INNER;
           end if;
+
+
+        when INNER =>
+          -- Aguardar resposta da INNER_CACHE (HIT = '1')
+          if inner_hit = '1' then
+            -- Retornar os dados encontrados para a CPU
+            C_DATA_OUT <= inner_data_out;
+            data_found  <= '1';
+
+            -- Voltar ao estado IDLE
+            state <= IDLE;
+          else
+            -- Se não encontrou, passar o endereço para o próximo nível
+            M_ADDR_OUT <= C_ADDR_IN;
+            search_deeper <= '1';
+            state <= SEARCH;
+          end if;
+
 
         when SEARCH =>
           -- Aguardar resposta do nível inferior (M_HIT = '1')
