@@ -1,4 +1,4 @@
-# CIRCUIT BOARD MC613-Digital-Circuits-Laboratory
+# MC613-Digital-Circuits-Laboratory
 This repository showcases all the laboratory assignments developed during the MC613 - Laboratório de Circuitos Digitais course at Unicamp. It reflects our understanding of digital design methodologies, programmable logic techniques, and hardware description using VHDL. The goal is to demonstrate the practical application of these concepts through the completed lab work.
 
 ## 🔬 Labs Overview
