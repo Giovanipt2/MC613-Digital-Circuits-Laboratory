@@ -24,9 +24,9 @@ entity OUTER_CACHE is
         M_DATA_OUT : out std_logic_vector(DATA_WIDTH-1 downto 0);
         M_WRITE    : out std_logic
         -- Sinais std_lgc para indicar recebimento e envio de dados
-        start_search_for_data : in std_logic; -- Sinal para indicar que a cache está procurando dados
-        data_found     : out std_logic; -- Sinal para indicar que os dados foram encontrados
-        search_deeper : out std_logic; -- Sinal para indicar que a busca deve continuar
+        C_START_SEARCH : in std_logic; -- Sinal para indicar que a cache está procurando dados
+        M_DATA_FOUND     : out std_logic; -- Sinal para indicar que os dados foram encontrados
+        M_SEARCH_DEEPER : out std_logic; -- Sinal para indicar que a busca deve continuar
       );
 end OUTER_CACHE;
 
@@ -60,7 +60,7 @@ architecture Behavioral of OUTER_CACHE is
   type state_type is (IDLE, INNER, SEARCH);
   signal state : state_type := IDLE;
 
-  -- Sinal auxiliar para detectar borda de subida em start_search_for_data
+  -- Sinal auxiliar para detectar borda de subida em C_START_SEARCH
   signal prev_start_search : std_logic := '0';
 
 begin
@@ -86,18 +86,18 @@ begin
   begin
     if rising_edge(CLK) then
       -- Atualizar o sinal auxiliar para detecção de borda
-      prev_start_search <= start_search_for_data;
+      prev_start_search <= C_START_SEARCH;
 
       -- Máquina de estados
       case state is
         when IDLE =>
           -- Inicializar sinais de saída
-          data_found    <= '0';
-          search_deeper <= '0';
+          M_DATA_FOUND    <= '0';
+          M_SEARCH_DEEPER <= '0';
           inner_write   <= '0';
 
-          -- Detectar borda de subida em start_search_for_data
-          if start_search_for_data = '1' and prev_start_search = '0' then
+          -- Detectar borda de subida em C_START_SEARCH
+          if C_START_SEARCH = '1' and prev_start_search = '0' then
             -- Passar o endereço da CPU para a INNER_CACHE
             inner_addr <= C_ADDR_IN;
             -- Aguardar resposta da INNER_CACHE
@@ -105,19 +105,19 @@ begin
           end if;
 
 
-        when INNER =>
+        when INNER =>  -- Esse estado serve apenas para aguardar a resposta da INNER_CACHE
           -- Aguardar resposta da INNER_CACHE (HIT = '1')
           if inner_hit = '1' then
             -- Retornar os dados encontrados para a CPU
             C_DATA_OUT <= inner_data_out;
-            data_found  <= '1';
+            M_DATA_FOUND  <= '1';
 
             -- Voltar ao estado IDLE
             state <= IDLE;
           else
             -- Se não encontrou, passar o endereço para o próximo nível
             M_ADDR_OUT <= C_ADDR_IN;
-            search_deeper <= '1';
+            M_SEARCH_DEEPER <= '1';
             state <= SEARCH;
           end if;
 
@@ -132,15 +132,15 @@ begin
 
             -- Retornar os dados para a CPU
             C_DATA_OUT <= M_DATA_IN;
-            data_found <= '1';
+            M_DATA_FOUND <= '1';
 
             -- Voltar ao estado IDLE
             state <= IDLE;
           else
             -- Continuar aguardando, manter sinais zerados
             inner_write   <= '0';
-            data_found    <= '0';
-            search_deeper <= '0';
+            M_DATA_FOUND    <= '0';
+            M_SEARCH_DEEPER <= '0';
           end if;
 
       end case;
