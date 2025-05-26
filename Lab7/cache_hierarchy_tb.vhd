@@ -42,6 +42,34 @@ architecture behavior of cache_hierarchy_tb is
   -- Clock process
   constant CLK_PERIOD : time := 10 ns;
 
+  -- Procedure to run a single test
+  procedure run_test(
+    signal cpu_addr        : out std_logic_vector(15 downto 0);
+    signal cpu_start_search: out std_logic;
+    signal cpu_data        : in std_logic_vector(31 downto 0);
+    signal l1_hit          : in std_logic;
+    address                : std_logic_vector(15 downto 0);
+    expected_data          : std_logic_vector(31 downto 0)
+  ) is
+  begin
+    -- Set the address and start the search
+    cpu_addr <= address;
+    wait for CLK_PERIOD;
+    cpu_start_search <= '1';
+    wait for CLK_PERIOD;
+    cpu_start_search <= '0';
+
+    -- Wait for L1 hit
+    wait until l1_hit = '1';
+
+    -- Validate the result
+    if cpu_data = expected_data then
+      report "PASS: Address " & to_hstring(address) & " returned expected data " & to_hstring(expected_data);
+    else
+      report "ERROR: Address " & to_hstring(address) & " returned incorrect data " & to_hstring(cpu_data) severity error;
+    end if;
+  end procedure;
+
 begin
 
   -- Instanciação das caches
@@ -112,9 +140,10 @@ begin
   begin
     wait for 10 ns;
 
-    -- Teste 1: Solicitar Endereco 0x0000 (espera miss em L1 e L2, busca na ROM)
-    wait for 3*CLK_PERIOD;
+    -- Teste 1: Solicitar Endereco 0x1000 (espera miss em L1 e L2, busca na ROM)
+    wait for 2*CLK_PERIOD;
     cpu_addr <= x"1000";
+    wait for CLK_PERIOD;
     cpu_start_search <= '1';
     wait for CLK_PERIOD;
     cpu_start_search <= '0';
@@ -125,9 +154,10 @@ begin
     report "";
     assert cpu_data = x"00001000" report "Erro no Teste 1" severity error;
 
-    -- Teste 2: Solicitar Endereco 0x0000 novamente (espera hit em L1)
-    wait for 3*CLK_PERIOD;
+    -- Teste 2: Solicitar Endereco 0x1000 novamente (espera hit em L1)
+    wait for 2*CLK_PERIOD;
     cpu_addr <= x"1000";
+    wait for CLK_PERIOD;
     cpu_start_search <= '1';
     wait for CLK_PERIOD;
     cpu_start_search <= '0';
@@ -136,24 +166,31 @@ begin
     report "";
     report "Teste 2 - Endereco 0x0000: (Esperado: 00001000, Hit em L1)";
     report "";
-    assert cpu_data = x"00001000" report "Erro no Teste 2" severity error;
+
+    if cpu_data = x"00001000" then
+      report "TESTE 1 CORRETO";
+    else
+      assert false report "Erro no Teste 2" severity error;
+    end if;
 
     -- Teste 3: Solicitar Endereco 0x0010 (espera miss em L1, busca em L2 ou ROM)
-    wait for 3*CLK_PERIOD;
-    cpu_addr <= x"0010";
+    wait for 2*CLK_PERIOD;
+    cpu_addr <= x"0001";
+    wait for CLK_PERIOD;
     cpu_start_search <= '1';
     wait for CLK_PERIOD;
     cpu_start_search <= '0';
     wait until l1_hit = '1';
     report "";
     report "";
-    report "Teste 3 - Endereco 0x0010: (Esperado: 00000010)";
+    report "Teste 3 - Endereco 0x0001: (Esperado: 00000001)";
     report "";
-    assert cpu_data = x"00000010" report "Erro no Teste 3" severity error;
+    assert cpu_data = x"00000001" report "Erro no Teste 3" severity error;
 
     -- Teste 4: Solicitar Endereco 0x0100 (espera miss, busca na ROM)
-    wait for 3*CLK_PERIOD;
+    wait for 2*CLK_PERIOD;
     cpu_addr <= x"0100";
+    wait for CLK_PERIOD;
     cpu_start_search <= '1';
     wait for CLK_PERIOD;
     cpu_start_search <= '0';
