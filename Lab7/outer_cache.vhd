@@ -22,11 +22,10 @@ entity OUTER_CACHE is
         M_DATA_IN  : in  std_logic_vector(DATA_WIDTH-1 downto 0);
         M_HIT      : in std_logic;
         M_DATA_OUT : out std_logic_vector(DATA_WIDTH-1 downto 0);
-        M_WRITE    : out std_logic
+        M_WRITE    : out std_logic;
         -- Sinais std_lgc para indicar recebimento e envio de dados
         C_START_SEARCH : in std_logic; -- Sinal para indicar que a cache está procurando dados
-        M_DATA_FOUND     : out std_logic; -- Sinal para indicar que os dados foram encontrados
-        M_SEARCH_DEEPER : out std_logic; -- Sinal para indicar que a busca deve continuar
+        M_SEARCH_DEEPER : out std_logic -- Sinal para indicar que a busca deve continuar
       );
 end OUTER_CACHE;
 
@@ -92,7 +91,7 @@ begin
       case state is
         when IDLE =>
           -- Inicializar sinais de saída
-          M_DATA_FOUND    <= '0';
+          C_HIT    <= '0';
           M_SEARCH_DEEPER <= '0';
           inner_write   <= '0';
 
@@ -110,7 +109,7 @@ begin
           if inner_hit = '1' then
             -- Retornar os dados encontrados para a CPU
             C_DATA_OUT <= inner_data_out;
-            M_DATA_FOUND  <= '1';
+            C_HIT  <= '1';
 
             -- Voltar ao estado IDLE
             state <= IDLE;
@@ -132,14 +131,14 @@ begin
 
             -- Retornar os dados para a CPU
             C_DATA_OUT <= M_DATA_IN;
-            M_DATA_FOUND <= '1';
+            C_HIT <= '1';
 
             -- Voltar ao estado IDLE
             state <= IDLE;
           else
             -- Continuar aguardando, manter sinais zerados
             inner_write   <= '0';
-            M_DATA_FOUND    <= '0';
+            C_HIT    <= '0';
             M_SEARCH_DEEPER <= '0';
           end if;
 
@@ -147,8 +146,6 @@ begin
     end if;
   end process;
 
-  -- Conectar C_HIT diretamente ao HIT da INNER_CACHE
-  C_HIT <= inner_hit;
 
   -- Sinais não utilizados (conforme simplificação)
   M_DATA_OUT <= (others => '0');
