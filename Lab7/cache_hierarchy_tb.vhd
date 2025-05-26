@@ -42,33 +42,35 @@ architecture behavior of cache_hierarchy_tb is
   -- Clock process
   constant CLK_PERIOD : time := 10 ns;
 
-  -- Procedure to run a single test
-  procedure run_test(
-    signal cpu_addr        : out std_logic_vector(15 downto 0);
-    signal cpu_start_search: out std_logic;
-    signal cpu_data        : in std_logic_vector(31 downto 0);
-    signal l1_hit          : in std_logic;
-    address                : std_logic_vector(15 downto 0);
-    expected_data          : std_logic_vector(31 downto 0)
+  -- Função de teste
+  procedure test_address (
+    signal cpu_addr         : out std_logic_vector(ADDR_WIDTH-1 downto 0);
+    signal cpu_start_search : out std_logic;
+    signal cpu_data         : in  std_logic_vector(DATA_WIDTH-1 downto 0);
+    signal l1_hit           : in  std_logic;
+    constant test_addr      : in  std_logic_vector(ADDR_WIDTH-1 downto 0);
+    constant expected_data  : in  std_logic_vector(DATA_WIDTH-1 downto 0);
+    constant test_name      : in  string
   ) is
   begin
-    -- Set the address and start the search
-    cpu_addr <= address;
+    wait for CLK_PERIOD;
+    cpu_addr <= test_addr;
     wait for CLK_PERIOD;
     cpu_start_search <= '1';
     wait for CLK_PERIOD;
     cpu_start_search <= '0';
-
-    -- Wait for L1 hit
-    wait until l1_hit = '1';
-
-    -- Validate the result
-    if cpu_data = expected_data then
-      report "PASS: Address " & to_hstring(address) & " returned expected data " & to_hstring(expected_data);
+    wait until l1_hit = '1' for 20 * CLK_PERIOD;
+    if l1_hit = '1' then
+      if cpu_data = expected_data then
+        report test_name & " - PASSOU: Endereco " & to_hstring(test_addr) & " retornou " & to_hstring(cpu_data);
+      else
+        report test_name & " - FALHOU: Endereco " & to_hstring(test_addr) & " retornou " & to_hstring(cpu_data) & ", esperado " & to_hstring(expected_data) severity error;
+      end if;
     else
-      report "ERROR: Address " & to_hstring(address) & " returned incorrect data " & to_hstring(cpu_data) severity error;
+      report test_name & " - FALHOU: Timeout esperando por hit em L1 para Endereco " & to_hstring(test_addr) severity error;
     end if;
   end procedure;
+
 
 begin
 
@@ -135,73 +137,36 @@ begin
     end loop;
   end process;
 
-  -- Simulação da CPU
+  -- Processo de simulação
   process
   begin
     wait for 10 ns;
 
-    -- Teste 1: Solicitar Endereco 0x1000 (espera miss em L1 e L2, busca na ROM)
-    wait for 2*CLK_PERIOD;
-    cpu_addr <= x"1000";
-    wait for CLK_PERIOD;
-    cpu_start_search <= '1';
-    wait for CLK_PERIOD;
-    cpu_start_search <= '0';
-    wait until l1_hit = '1';
-    report "";
-    report "";
-    report "Teste 1 - Endereco 0x0000 (Esperado: 00001000)";
-    report "";
-    assert cpu_data = x"00001000" report "Erro no Teste 1" severity error;
+    -- Teste 1: Endereço 0x1000 (miss em L1 e L2, busca na ROM)
+    test_address(cpu_addr, cpu_start_search, cpu_data, l1_hit, x"1000", x"00001000", "Teste 1");
 
-    -- Teste 2: Solicitar Endereco 0x1000 novamente (espera hit em L1)
-    wait for 2*CLK_PERIOD;
-    cpu_addr <= x"1000";
-    wait for CLK_PERIOD;
-    cpu_start_search <= '1';
-    wait for CLK_PERIOD;
-    cpu_start_search <= '0';
-    wait until l1_hit = '1';
-    report "";
-    report "";
-    report "Teste 2 - Endereco 0x0000: (Esperado: 00001000, Hit em L1)";
-    report "";
+    -- Teste 2: Endereço 0x1000 novamente (hit em L1)
+    test_address(cpu_addr, cpu_start_search, cpu_data, l1_hit, x"1000", x"00001000", "Teste 2");
 
-    if cpu_data = x"00001000" then
-      report "TESTE 1 CORRETO";
-    else
-      assert false report "Erro no Teste 2" severity error;
-    end if;
+    -- Teste 3: Endereço 0x0001 (miss em L1, busca em L2 ou ROM)
+    test_address(cpu_addr, cpu_start_search, cpu_data, l1_hit, x"0001", x"00000001", "Teste 3");
 
-    -- Teste 3: Solicitar Endereco 0x0010 (espera miss em L1, busca em L2 ou ROM)
-    wait for 2*CLK_PERIOD;
-    cpu_addr <= x"0001";
-    wait for CLK_PERIOD;
-    cpu_start_search <= '1';
-    wait for CLK_PERIOD;
-    cpu_start_search <= '0';
-    wait until l1_hit = '1';
-    report "";
-    report "";
-    report "Teste 3 - Endereco 0x0001: (Esperado: 00000001)";
-    report "";
-    assert cpu_data = x"00000001" report "Erro no Teste 3" severity error;
+    -- Teste 4: Endereço 0x0100 (miss, busca na ROM)
+    test_address(cpu_addr, cpu_start_search, cpu_data, l1_hit, x"0100", x"00000100", "Teste 4");
 
-    -- Teste 4: Solicitar Endereco 0x0100 (espera miss, busca na ROM)
-    wait for 2*CLK_PERIOD;
-    cpu_addr <= x"0100";
-    wait for CLK_PERIOD;
-    cpu_start_search <= '1';
-    wait for CLK_PERIOD;
-    cpu_start_search <= '0';
-    wait until l1_hit = '1';
-    report "";
-    report "";
-    report "Teste 4 - Endereco 0x0100: (Esperado: 00000100)";
-    report "";
-    assert cpu_data = x"00000100" report "Erro no Teste 4" severity error;
+    -- Teste 5: Endereço 0x1004 (mesmo conjunto que 0x1000, offset diferente)
+    test_address(cpu_addr, cpu_start_search, cpu_data, l1_hit, x"1004", x"00001004", "Teste 5");
 
-    wait for 3*CLK_PERIOD;
+    -- Teste 6: Endereço 0x2000 (novo endereço, miss)
+    test_address(cpu_addr, cpu_start_search, cpu_data, l1_hit, x"2000", x"00002000", "Teste 6");
+
+    -- Teste 7: Endereço 0x1000 novamente (hit em L1)
+    test_address(cpu_addr, cpu_start_search, cpu_data, l1_hit, x"1000", x"00001000", "Teste 7");
+
+    -- Teste 8: Endereço 0x0001 novamente (hit em L1)
+    test_address(cpu_addr, cpu_start_search, cpu_data, l1_hit, x"0001", x"00000001", "Teste 8");
+
+    wait for 3 * CLK_PERIOD;
     report "Fim da simulacao";
     wait;
   end process;
