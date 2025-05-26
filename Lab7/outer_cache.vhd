@@ -97,8 +97,6 @@ begin
 
           -- Detectar borda de subida em C_START_SEARCH
           if C_START_SEARCH = '1' and prev_start_search = '0' then
-            -- Passar o endereço da CPU para a INNER_CACHE
-            inner_addr <= C_ADDR_IN;
             -- Aguardar resposta da INNER_CACHE
             state <= INNER;
           end if;
@@ -125,7 +123,6 @@ begin
           -- Aguardar resposta do nível inferior (M_HIT = '1')
           if M_HIT = '1' then
             -- Salvar os dados recebidos na INNER_CACHE
-            inner_addr    <= C_ADDR_IN;
             inner_data_in <= M_DATA_IN;
             inner_write   <= '1';
 
@@ -146,6 +143,8 @@ begin
     end if;
   end process;
 
+  -- Atribuir o endereço de entrada da CPU para a INNER_CACHE
+  inner_addr    <= C_ADDR_IN;
 
   -- Sinais não utilizados (conforme simplificação)
   M_DATA_OUT <= (others => '0');
