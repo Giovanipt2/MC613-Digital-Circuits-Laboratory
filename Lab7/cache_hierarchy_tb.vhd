@@ -6,12 +6,12 @@ entity cache_hierarchy_tb is
 end cache_hierarchy_tb;
 
 architecture behavior of cache_hierarchy_tb is
-  -- Parâmetros
-  constant ADDR_WIDTH   : integer := 16;        -- Enderecos de 16 bits
-  constant DATA_WIDTH   : integer := 32;        -- Linha de cache de 32 bits (4 bytes)
-  constant OFFSET_WIDTH : integer := 2;         -- 2 bits para offset (4 bytes por linha)
+  -- Parameters
+  constant ADDR_WIDTH   : integer := 16;        -- 16-bit addresses
+  constant DATA_WIDTH   : integer := 32;        -- 32-bit cache line (4 bytes)
+  constant OFFSET_WIDTH : integer := 2;         -- 2 bits for offset (4 bytes per line)
 
-  -- Sinais da CPU
+  -- CPU signals
   signal cpu_addr        : std_logic_vector(ADDR_WIDTH-1 downto 0) := (others => '0');
   signal cpu_start_search: std_logic := '0';
   signal cpu_data        : std_logic_vector(DATA_WIDTH-1 downto 0) := (others => '0');
@@ -19,8 +19,7 @@ architecture behavior of cache_hierarchy_tb is
   signal cpu_data_out    : std_logic_vector(DATA_WIDTH-1 downto 0) := (others => '0');
   signal l1_hit         : std_logic := '0';
 
-
-  -- Sinais entre L1 e L2
+  -- Signals between L1 and L2
   signal l1_m_addr_out   : std_logic_vector(ADDR_WIDTH-1 downto 0) := (others => '0');
   signal l1_search_deeper: std_logic := '0';
   signal l1_m_data_in    : std_logic_vector(DATA_WIDTH-1 downto 0) := (others => '0');
@@ -28,7 +27,7 @@ architecture behavior of cache_hierarchy_tb is
   signal l1_m_data_out   : std_logic_vector(DATA_WIDTH-1 downto 0) := (others => '0');
   signal l2_hit         : std_logic := '0';
 
-  -- Sinais entre L2 e ROM
+  -- Signals between L2 and ROM
   signal l2_m_addr_out   : std_logic_vector(ADDR_WIDTH-1 downto 0) := (others => '0');
   signal l2_search_deeper: std_logic := '0';
   signal l2_m_data_in    : std_logic_vector(DATA_WIDTH-1 downto 0) := (others => '0');
@@ -36,45 +35,53 @@ architecture behavior of cache_hierarchy_tb is
   signal l2_m_data_out   : std_logic_vector(DATA_WIDTH-1 downto 0) := (others => '0');
   signal l2_m_write       : std_logic := '0';
 
-  -- Clock e Reset
+  -- Clock and Reset
   signal clk : std_logic := '0';
 
   -- Clock process
   constant CLK_PERIOD : time := 10 ns;
 
-  -- Função de teste
+  -- Test procedure
   procedure test_address (
     signal cpu_addr         : out std_logic_vector(ADDR_WIDTH-1 downto 0);
     signal cpu_start_search : out std_logic;
     signal cpu_data         : in  std_logic_vector(DATA_WIDTH-1 downto 0);
-    signal l1_hit           : in  std_logic;
     constant test_addr      : in  std_logic_vector(ADDR_WIDTH-1 downto 0);
     constant expected_data  : in  std_logic_vector(DATA_WIDTH-1 downto 0);
     constant test_name      : in  string
   ) is
+  variable delay_counter : integer := 0;
   begin
+    -- Setting the address
     wait for CLK_PERIOD;
     cpu_addr <= test_addr;
     wait for CLK_PERIOD;
+
+    -- Resetting the delay counter
+    delay_counter := 0;
+
+    -- Starting the search (count 1 cycle)
     cpu_start_search <= '1';
     wait for CLK_PERIOD;
+    delay_counter := delay_counter + 1;
     cpu_start_search <= '0';
-    wait until l1_hit = '1' for 20 * CLK_PERIOD;
-    if l1_hit = '1' then
-      if cpu_data = expected_data then
-        report test_name & " - PASSOU: Endereco " & to_hstring(test_addr) & " retornou " & to_hstring(cpu_data);
-      else
-        report test_name & " - FALHOU: Endereco " & to_hstring(test_addr) & " retornou " & to_hstring(cpu_data) & ", esperado " & to_hstring(expected_data) severity error;
-      end if;
+
+    -- Wait for 20 cycles using a counter
+    while delay_counter < 20 loop
+      wait for CLK_PERIOD;
+      delay_counter := delay_counter + 1;
+    end loop;
+
+    if cpu_data = expected_data then
+      report test_name & " - PASSED: Address " & to_hstring(test_addr) & " returned " & to_hstring(cpu_data);
     else
-      report test_name & " - FALHOU: Timeout esperando por hit em L1 para Endereco " & to_hstring(test_addr) severity error;
+      report test_name & " - FAILED: Address " & to_hstring(test_addr) & " returned " & to_hstring(cpu_data) & ", expected " & to_hstring(expected_data) severity error;
     end if;
   end procedure;
 
-
 begin
 
-  -- Instanciação das caches
+  -- Instantiation of caches
   cache_l1 : entity work.OUTER_CACHE
     generic map (
       TAG_WIDTH    => 10,
@@ -121,9 +128,9 @@ begin
       M_SEARCH_DEEPER  => l2_search_deeper
     );
 
-  -- Devolver o valor X quando buscar no Endereco X
+  -- Return the value X when searching for address X
   l2_m_data_in <= std_logic_vector(resize(unsigned(l2_m_addr_out), 32));
-  -- A ROM sempre "encontra" o dado
+  -- The ROM always "finds" the data
   rom_hit <= l2_search_deeper;
 
   -- Clock process
@@ -137,38 +144,44 @@ begin
     end loop;
   end process;
 
-  -- Processo de simulação
+  -- Simulation process
   process
   begin
     wait for 10 ns;
 
-    -- Teste 1: Endereço 0x1000 (miss em L1 e L2, busca na ROM)
-    test_address(cpu_addr, cpu_start_search, cpu_data, l1_hit, x"1000", x"00001000", "Teste 1");
+    -- Test 1: Address 0x1000 (miss in L1 and L2, fetch from ROM)
+    test_address(cpu_addr, cpu_start_search, cpu_data, x"1000", x"00001000", "Test 1");
 
-    -- Teste 2: Endereço 0x1000 novamente (hit em L1)
-    test_address(cpu_addr, cpu_start_search, cpu_data, l1_hit, x"1000", x"00001000", "Teste 2");
+    -- Test 2: Address 0x1000 again (hit in L1)
+    test_address(cpu_addr, cpu_start_search, cpu_data, x"1000", x"00001000", "Test 2");
 
-    -- Teste 3: Endereço 0x0001 (miss em L1, busca em L2 ou ROM)
-    test_address(cpu_addr, cpu_start_search, cpu_data, l1_hit, x"0001", x"00000001", "Teste 3");
+    -- Test 3: Address 0x0001 (miss in L1, fetch from L2 or ROM)
+    test_address(cpu_addr, cpu_start_search, cpu_data, x"0001", x"00000001", "Test 3");
 
-    -- Teste 4: Endereço 0x0100 (miss, busca na ROM)
-    test_address(cpu_addr, cpu_start_search, cpu_data, l1_hit, x"0100", x"00000100", "Teste 4");
+    -- Test 4: Address 0x0100 (miss, fetch from ROM)
+    test_address(cpu_addr, cpu_start_search, cpu_data, x"0100", x"00000100", "Test 4");
 
-    -- Teste 5: Endereço 0x1004 (mesmo conjunto que 0x1000, offset diferente)
-    test_address(cpu_addr, cpu_start_search, cpu_data, l1_hit, x"1004", x"00001004", "Teste 5");
+    -- Test 5: Address 0x1004 (same set as 0x1000, different offset)
+    test_address(cpu_addr, cpu_start_search, cpu_data, x"1004", x"00001004", "Test 5");
 
-    -- Teste 6: Endereço 0x2000 (novo endereço, miss)
-    test_address(cpu_addr, cpu_start_search, cpu_data, l1_hit, x"2000", x"00002000", "Teste 6");
+    -- Test 6: Address 0x2000 (new address, miss)
+    test_address(cpu_addr, cpu_start_search, cpu_data, x"2000", x"00002000", "Test 6");
 
-    -- Teste 7: Endereço 0x1000 novamente (hit em L1)
-    test_address(cpu_addr, cpu_start_search, cpu_data, l1_hit, x"1000", x"00001000", "Teste 7");
+    -- Test 7: Address 0x1000 again (hit in L1)
+    test_address(cpu_addr, cpu_start_search, cpu_data, x"1000", x"00001000", "Test 7");
 
-    -- Teste 8: Endereço 0x0001 novamente (hit em L1)
-    test_address(cpu_addr, cpu_start_search, cpu_data, l1_hit, x"0001", x"00000001", "Teste 8");
+    -- Test 8: Address 0x0001 again (hit in L1)
+    test_address(cpu_addr, cpu_start_search, cpu_data, x"0001", x"00000001", "Test 8");
 
     wait for 3 * CLK_PERIOD;
-    report "Fim da simulacao";
+    report "End of simulation";
     wait;
   end process;
 
 end behavior;
+
+--PERGUNTAS:
+-- 1. Pode implementar a memoria ROM da forma que foi feita (só devolver o endereço)?
+-- 2. Era assim que queria que implementasse a espera de 20 ciclos antes de devolver a resposta?
+-- 3. E o offset? Precisa recortar ele da resposta final ou assim está bom?
+-- 4. O diagram está bom? 
