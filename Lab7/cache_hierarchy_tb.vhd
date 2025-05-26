@@ -128,8 +128,10 @@ begin
       M_SEARCH_DEEPER  => l2_search_deeper
     );
 
-  -- Return the value X when searching for address X
-  l2_m_data_in <= std_logic_vector(resize(unsigned(l2_m_addr_out), 32));
+    -- Note: This is a simplified ROM implementation for testing purposes
+    -- Return the value (X - X%4) when searching for address X
+    -- This means the ROM return (X AND 0xFFFFFFFC) to simulate 4-byte alignment
+  l2_m_data_in <= std_logic_vector(resize(unsigned(l2_m_addr_out), 32)(31 downto 2) & "00");
   -- The ROM always "finds" the data
   rom_hit <= l2_search_deeper;
 
@@ -156,7 +158,7 @@ begin
     test_address(cpu_addr, cpu_start_search, cpu_data, x"1000", x"00001000", "Test 2");
 
     -- Test 3: Address 0x0001 (miss in L1, fetch from L2 or ROM)
-    test_address(cpu_addr, cpu_start_search, cpu_data, x"0001", x"00000001", "Test 3");
+    test_address(cpu_addr, cpu_start_search, cpu_data, x"0001", x"00000000", "Test 3");
 
     -- Test 4: Address 0x0100 (miss, fetch from ROM)
     test_address(cpu_addr, cpu_start_search, cpu_data, x"0100", x"00000100", "Test 4");
@@ -171,7 +173,32 @@ begin
     test_address(cpu_addr, cpu_start_search, cpu_data, x"1000", x"00001000", "Test 7");
 
     -- Test 8: Address 0x0001 again (hit in L1)
-    test_address(cpu_addr, cpu_start_search, cpu_data, x"0001", x"00000001", "Test 8");
+    test_address(cpu_addr, cpu_start_search, cpu_data, x"0001", x"00000000", "Test 8");
+
+    -- Test 9: Address 0x0000 (first access, miss all)
+    test_address(cpu_addr, cpu_start_search, cpu_data, x"0000", x"00000000", "Test 9");
+
+    -- Test 10: Address 0x0000 again (should hit in L1)
+    test_address(cpu_addr, cpu_start_search, cpu_data, x"0000", x"00000000", "Test 10");
+
+    -- Test 11: Address 0x0003 (max offset within a line)
+    test_address(cpu_addr, cpu_start_search, cpu_data, x"0003", x"00000000", "Test 11");
+
+    -- Test 12: Address 0xFFFC (last 4‐byte aligned in space)
+    test_address(cpu_addr, cpu_start_search, cpu_data, x"FFFC", x"0000FFFC", "Test 12");
+
+    -- Test 13: Address 0xFFFF (unaligned at very end)
+    test_address(cpu_addr, cpu_start_search, cpu_data, x"FFFF", x"0000FFFC", "Test 13");
+
+    -- Test 14: Address 0x0010 (miss, fetch from ROM)
+    test_address(cpu_addr, cpu_start_search, cpu_data, x"0010", x"00000010", "Test 14");
+
+    -- Test 15: Address 0x0050 (miss, fetch from ROM)
+    test_address(cpu_addr, cpu_start_search, cpu_data, x"0050", x"00000050", "Test 15");
+
+    -- Test 16: Re‐access 0x0010 (should miss in L1 due to eviction and hit)
+    test_address(cpu_addr, cpu_start_search, cpu_data, x"0010", x"00000010", "Test 16");
+
 
     wait for 3 * CLK_PERIOD;
     report "End of simulation";
