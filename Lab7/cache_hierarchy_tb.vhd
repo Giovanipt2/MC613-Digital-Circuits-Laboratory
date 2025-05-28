@@ -41,6 +41,39 @@ architecture behavior of cache_hierarchy_tb is
   -- Clock process
   constant CLK_PERIOD : time := 10 ns;
 
+  -- Custom function to convert std_logic_vector to hex string
+  function to_hex_string(slv : std_logic_vector) return string is
+    variable hex_len : integer := (slv'length + 3) / 4; -- Number of hex digits needed
+    variable hex_str : string(1 to hex_len);           -- String to hold hex characters
+    variable v_slv   : std_logic_vector(slv'length - 1 downto 0) := slv; -- Working copy of input
+  begin
+    for i in hex_len downto 1 loop
+      case v_slv(3 downto 0) is
+        when "0000" => hex_str(i) := '0';
+        when "0001" => hex_str(i) := '1';
+        when "0010" => hex_str(i) := '2';
+        when "0011" => hex_str(i) := '3';
+        when "0100" => hex_str(i) := '4';
+        when "0101" => hex_str(i) := '5';
+        when "0110" => hex_str(i) := '6';
+        when "0111" => hex_str(i) := '7';
+        when "1000" => hex_str(i) := '8';
+        when "1001" => hex_str(i) := '9';
+        when "1010" => hex_str(i) := 'A';
+        when "1011" => hex_str(i) := 'B';
+        when "1100" => hex_str(i) := 'C';
+        when "1101" => hex_str(i) := 'D';
+        when "1110" => hex_str(i) := 'E';
+        when "1111" => hex_str(i) := 'F';
+        when others => hex_str(i) := 'X'; -- For undefined states (e.g., 'U', 'Z')
+      end case;
+      if i > 1 then
+        v_slv := "0000" & v_slv(v_slv'length - 1 downto 4); -- Shift right by 4 bits
+      end if;
+    end loop;
+    return hex_str;
+  end function;
+
   -- Test procedure
   procedure test_address (
     signal cpu_addr         : out std_logic_vector(ADDR_WIDTH-1 downto 0);
@@ -73,9 +106,9 @@ architecture behavior of cache_hierarchy_tb is
     end loop;
 
     if cpu_data = expected_data then
-      report test_name & " - PASSED: Address " & to_hstring(test_addr) & " returned " & to_hstring(cpu_data);
+      report test_name & " - PASSED: Address " & to_hex_string(test_addr) & " returned " & to_hex_string(cpu_data);
     else
-      report test_name & " - FAILED: Address " & to_hstring(test_addr) & " returned " & to_hstring(cpu_data) & ", expected " & to_hstring(expected_data) severity error;
+      report test_name & " - FAILED: Address " & to_hex_string(test_addr) & " returned " & to_hex_string(cpu_data) & ", expected " & to_hex_string(expected_data) severity error;
     end if;
   end procedure;
 
@@ -206,9 +239,3 @@ begin
   end process;
 
 end behavior;
-
---PERGUNTAS:
--- 1. Pode implementar a memoria ROM da forma que foi feita (só devolver o endereço)?
--- 2. Era assim que queria que implementasse a espera de 20 ciclos antes de devolver a resposta?
--- 3. E o offset? Precisa recortar ele da resposta final ou assim está bom?
--- 4. O diagram está bom? 
