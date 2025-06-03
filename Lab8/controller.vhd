@@ -279,7 +279,7 @@ begin
             DRAM_WE_N  <= '1';
             seq_counter <= seq_counter + 1;
             refresh_counter <= refresh_counter + 1;
-            if seq_counter = 10 then
+          if seq_counter = 10 then
               data_reg <= DRAM_DQ; -- Latch data after CAS latency (3 cycles)
             end if;
           else
