@@ -35,11 +35,13 @@ architecture behavior of controller_board is
 
     -- PLL component declaration (Generated via Quartus IP Catalog)
     -- Input: 50MHz, Output: 143MHz
-    component altpll_sdram_clk
-        port (
-            inclk0 : in  std_logic := '0'; -- Input clock (50 MHz)
-            c0     : out std_logic        -- Output clock (143 MHz for SDRAM)
-        );
+    component pll
+    port (
+		refclk   : in  std_logic := '0'; --  refclk.clk
+		rst      : in  std_logic := '0'; --   reset.reset
+		outclk_0 : out std_logic;        -- outclk0.clk
+		locked   : out std_logic         --  locked.export
+	);
     end component;
 
     -- SDRAM Controller component
@@ -77,19 +79,6 @@ architecture behavior of controller_board is
     -- Internal signals
     signal sdram_clk          : std_logic; -- 143 MHz clock from PLL
 
-    -- Debouncing and Edge Detection
-    signal key2_async         : std_logic;
-    signal key3_async         : std_logic;
-    signal key2_debounced     : std_logic := '1';
-    signal key3_debounced     : std_logic := '1';
-    signal key2_prev_deb      : std_logic := '1';
-    signal key3_prev_deb      : std_logic := '1';
-    signal key2_pressed_edge  : std_logic; -- Falling edge
-    signal key3_pressed_edge  : std_logic; -- Falling edge
-    signal debounce_counter_k2: integer range 0 to 500000 := 0; -- ~10ms debounce at 50MHz
-    signal debounce_counter_k3: integer range 0 to 500000 := 0;
-    constant DEBOUNCE_MAX     : integer := 500000; -- for 50MHz clock (10ms)
-
     -- State machine for operations
     type op_state_t is (
         S_IDLE,
@@ -106,14 +95,13 @@ architecture behavior of controller_board is
     signal s_c_data_out_raw   : std_logic_vector(15 downto 0); -- from SDRAM_CTRL (sdram_clk domain)
     signal s_c_ready_raw      : std_logic;                     -- from SDRAM_CTRL (sdram_clk domain)
 
-    -- Signals synchronized to CLOCK_50 domain
-    signal s_c_data_out_clk50 : std_logic_vector(15 downto 0);
-    signal s_c_ready_clk50_s1 : std_logic;
-    signal s_c_ready_clk50_s2 : std_logic; -- Synchronized C_READY
-
     -- Registers for display values
     signal disp_addr_val      : std_logic_vector(9 downto 0)  := (others => '0');
     signal disp_data_val      : std_logic_vector(15 downto 0) := (others => '0');
+
+    -- Edge detection for KEY presses
+    signal last_key2 : std_logic := '0';
+    signal last_key3 : std_logic := '0';
 
     -- Temporary storage for write operation
     signal temp_write_addr    : std_logic_vector(9 downto 0);
@@ -121,10 +109,12 @@ architecture behavior of controller_board is
 begin
 
     -- Instantiate PLL for SDRAM clock (143 MHz)
-    pll_inst : altpll_sdram_clk
+    pll_inst : pll
     port map (
-        inclk0 => CLOCK_50,
-        c0     => sdram_clk
+        refclk   => CLOCK_50,
+        rst      => '0', -- No reset
+        outclk_0 => sdram_clk,
+        locked   => open -- Not used in this design
     );
 
     -- Instantiate SDRAM Controller
@@ -150,69 +140,29 @@ begin
         DRAM_CS_N  => DRAM_CS_N
     );
 
-    -- Debouncing and Edge Detection for KEY(2) and KEY(3)
-    -- Keys are active low
-    key2_async <= KEY(2);
-    key3_async <= KEY(3);
 
-    debounce_edge_proc : process(CLOCK_50)
+
+    -- Main Control FSM (driven by sdram_clk)
+    control_fsm_proc : process(sdram_clk)
     begin
-        if rising_edge(CLOCK_50) then
-            -- Debounce KEY(2)
-            if key2_async /= key2_prev_deb then -- if changed
-                debounce_counter_k2 <= 0;
-            elsif debounce_counter_k2 < DEBOUNCE_MAX then
-                debounce_counter_k2 <= debounce_counter_k2 + 1;
-            else -- stable for DEBOUNCE_MAX cycles
-                key2_debounced <= key2_async;
-            end if;
-            key2_pressed_edge <= key2_prev_deb and not key2_debounced; -- Falling edge
-            key2_prev_deb <= key2_debounced;
-
-            -- Debounce KEY(3)
-            if key3_async /= key3_prev_deb then
-                debounce_counter_k3 <= 0;
-            elsif debounce_counter_k3 < DEBOUNCE_MAX then
-                debounce_counter_k3 <= debounce_counter_k3 + 1;
-            else
-                key3_debounced <= key3_async;
-            end if;
-            key3_pressed_edge <= key3_prev_deb and not key3_debounced; -- Falling edge
-            key3_prev_deb <= key3_debounced;
-        end if;
-    end process;
-
-    -- Clock Domain Crossing: Synchronize C_READY and register C_DATA_OUT
-    cdc_proc : process(CLOCK_50)
-    begin
-        if rising_edge(CLOCK_50) then
-            -- Synchronize C_READY (from sdram_clk domain to CLOCK_50 domain)
-            s_c_ready_clk50_s1 <= s_c_ready_raw;
-            s_c_ready_clk50_s2 <= s_c_ready_clk50_s1;
-
-            -- Register C_DATA_OUT (from sdram_clk domain to CLOCK_50 domain)
-            s_c_data_out_clk50 <= s_c_data_out_raw;
-        end if;
-    end process;
-
-    -- Main Control FSM (driven by CLOCK_50)
-    control_fsm_proc : process(CLOCK_50)
-    begin
-        if rising_edge(CLOCK_50) then
+        if rising_edge(sdram_clk) then
             -- Default command values
             s_c_read_cmd  <= '0';
             s_c_write_cmd <= '0';
+            -- Edge detection for KEY presses
+            last_key2 <= KEY(2);
+            last_key3 <= KEY(3);
 
             case current_op_state is
                 when S_IDLE =>
                     -- If KEY(2) is pressed, initiate Write operation
-                    if key2_pressed_edge = '1' then
+                    if KEY(2) = '0' and last_key2 = '1' then
                         disp_addr_val <= SW(9 downto 0); -- Show current SW as potential address
                         disp_data_val <= "0000000000000000"; -- Clear data display
                         -- HEX displays could show "SETA" (Set Address) or similar indication
                         current_op_state <= S_WRITE_GET_ADDR;
                     -- If KEY(3) is pressed, initiate Read operation
-                    elsif key3_pressed_edge = '1' then
+                    elsif KEY(3) = '0' and last_key3 = '1' then
                         disp_addr_val <= SW(9 downto 0);
                         disp_data_val <= "0000000000000000"; -- Clear data display
                         s_c_addr_in   <= "00000" & SW(9 downto 0); -- Use SW for lower 10 bits of address
@@ -228,8 +178,8 @@ begin
                 when S_READ_WAIT_SDRAM =>
                     -- Wait for SDRAM controller to become ready again
                     -- C_READY goes low when busy, then high when done.
-                    if s_c_ready_clk50_s2 = '1' then
-                        disp_data_val <= s_c_data_out_clk50; -- Latch data
+                    if s_c_ready_raw = '1' then
+                        disp_data_val <= s_c_data_out_raw; -- Latch data
                         current_op_state <= S_IDLE;
                     end if;
                     -- C_ADDR_IN is held by s_c_addr_in signal from S_IDLE transition
@@ -238,7 +188,7 @@ begin
                 when S_WRITE_GET_ADDR =>
                     -- User sets address on SW, presses KEY(2) to confirm
                     disp_addr_val <= SW(9 downto 0); -- Continuously display SW for address
-                    if key2_pressed_edge = '1' then
+                    if KEY(2) = '0' and last_key2 = '1' then
                         temp_write_addr <= SW(9 downto 0);
                         disp_addr_val   <= SW(9 downto 0); -- Freeze displayed address
                         current_op_state <= S_WRITE_GET_DATA;
@@ -248,7 +198,7 @@ begin
                 when S_WRITE_GET_DATA =>
                     -- User sets data on SW, presses KEY(2) to confirm and send
                     disp_data_val <= "000000" & SW(9 downto 0); -- Continuously display SW for data
-                    if key2_pressed_edge = '1' then
+                    if KEY(2) = '0' and last_key2 = '1' then
                         s_c_addr_in   <= "00000" & temp_write_addr;
                         s_c_data_in   <= "000000" & SW(9 downto 0);
                         disp_data_val <= "000000" & SW(9 downto 0); -- Freeze displayed data
@@ -262,7 +212,7 @@ begin
 
                 when S_WRITE_WAIT_SDRAM =>
                     -- Wait for SDRAM controller to become ready again
-                    if s_c_ready_clk50_s2 = '1' then
+                    if s_c_ready_raw = '1' then
                         current_op_state <= S_IDLE;
                     end if;
                     -- C_ADDR_IN and C_DATA_IN are held by s_c_addr_in/s_c_data_in signals

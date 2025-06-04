@@ -35,7 +35,7 @@ architecture Behavioral of SDRAM_CTRL is
 
   -- Counters
   signal counter        : integer range 0 to 14311 := 0; -- For INIT sequence
-  signal 	: integer range 0 to 1000 := 0; -- For periodic refresh
+  signal refresh_counter: integer range 0 to 1000 := 0; -- For periodic refresh
   signal seq_counter    : integer range 0 to 13   := 0; -- For READ/WRITE sequences
 
   -- Data register for read operations
@@ -80,7 +80,7 @@ begin
             DRAM_RAS_N <= '0';
             DRAM_CAS_N <= '1';
             DRAM_WE_N  <= '0';
-            DRAM_ADDR  <= (10 => '1', others => '0'); -- A10=1 for precharge all
+            DRAM_ADDR  <= "0010000000000";
             DRAM_BA    <= "00"; -- Don't care
             counter <= counter + 1;
           elsif counter = 14287 then
@@ -134,14 +134,14 @@ begin
 
         -- Idle state
         when IDLE =>
-				<= 	 + 1;
+				  refresh_counter <= refresh_counter + 1;
           DRAM_CS_N  <= '0';
           DRAM_RAS_N <= '1';
           DRAM_CAS_N <= '1';
           DRAM_WE_N  <= '1';
-          if 	 >= 1000 then
+          if refresh_counter >= 1000 then
             state <= REFRESH_STATE;
-					<= 0;
+					  refresh_counter <= 0;
             seq_counter <= 0;
           -- OBS: this might need to be adjusted (there is the possibility that the C_WRITE or C_READ signals are asserted during the refresh)
           elsif C_WRITE = '1' then
@@ -182,7 +182,7 @@ begin
             DRAM_CAS_N <= '1';
             DRAM_WE_N  <= '1';
             seq_counter <= seq_counter + 1;
-					<= 	 + 1; -- Increment refresh counter even in write state
+					  refresh_counter <= refresh_counter + 1; -- Increment refresh counter even in write state
           elsif seq_counter = 3 then
             -- ACTIVE
             DRAM_CS_N  <= '0';
@@ -190,9 +190,9 @@ begin
             DRAM_CAS_N <= '1';
             DRAM_WE_N  <= '1';
             DRAM_BA    <= "00"; -- Fixed bank
-            DRAM_ADDR  <= "00000" & C_ADDR_IN(14 downto 10); -- Row address
+            DRAM_ADDR  <= "0000000" & C_ADDR_IN(5 downto 0); -- Row address extended to 13 bits
             seq_counter <= seq_counter + 1;
-					<= 	 + 1;
+            refresh_counter <= refresh_counter + 1;
           elsif seq_counter < 7 then
             -- Wait 3 cycles (tRCD)
             DRAM_CS_N  <= '0';
@@ -200,7 +200,7 @@ begin
             DRAM_CAS_N <= '1';
             DRAM_WE_N  <= '1';
             seq_counter <= seq_counter + 1;
-					<= 	 + 1;
+            refresh_counter <= refresh_counter + 1;
           elsif seq_counter = 7 then
             -- WRITE
             DRAM_CS_N  <= '0';
@@ -208,10 +208,10 @@ begin
             DRAM_CAS_N <= '0';
             DRAM_WE_N  <= '0';
             DRAM_BA    <= "00";
-            DRAM_ADDR  <= "00" & '1' & C_ADDR_IN(9 downto 0); -- Column with A10=1
+            DRAM_ADDR  <= "001000000" & C_ADDR_IN(9 downto 6); -- Column with A10=1 extended to 13 bits
             write_enable <= '1';
             seq_counter <= seq_counter + 1;
-					<= 	 + 1;
+            refresh_counter <= refresh_counter + 1;
           else
             write_enable <= '0';
             if seq_counter < 13 then
@@ -221,7 +221,7 @@ begin
               DRAM_CAS_N <= '1';
               DRAM_WE_N  <= '1';
               seq_counter <= seq_counter + 1;
-						<= 	 + 1;
+              refresh_counter <= refresh_counter + 1;
             else
               state <= IDLE;
               seq_counter <= 0;
@@ -237,7 +237,7 @@ begin
             DRAM_CAS_N <= '1';
             DRAM_WE_N  <= '1';
             seq_counter <= seq_counter + 1;
-					<= 	 + 1; -- Increment refresh counter even in read state
+					  refresh_counter <= refresh_counter + 1; -- Increment refresh counter even in read state
           elsif seq_counter = 3 then
             -- ACTIVE
             DRAM_CS_N  <= '0';
@@ -245,9 +245,9 @@ begin
             DRAM_CAS_N <= '1';
             DRAM_WE_N  <= '1';
             DRAM_BA    <= "00";
-            DRAM_ADDR  <= "00000" & C_ADDR_IN(14 downto 10); -- Row address
+            DRAM_ADDR  <= "0000000" & C_ADDR_IN(5 downto 0); -- Row address extended to 13 bits
             seq_counter <= seq_counter + 1;
-					<= 	 + 1;
+            refresh_counter <= refresh_counter + 1;
           elsif seq_counter < 7 then
             -- Wait 3 cycles
             DRAM_CS_N  <= '0';
@@ -255,7 +255,7 @@ begin
             DRAM_CAS_N <= '1';
             DRAM_WE_N  <= '1';
             seq_counter <= seq_counter + 1;
-					<= 	 + 1;
+            refresh_counter <= refresh_counter + 1;
           elsif seq_counter = 7 then
             -- READ
             DRAM_CS_N  <= '0';
@@ -263,9 +263,9 @@ begin
             DRAM_CAS_N <= '0';
             DRAM_WE_N  <= '1';
             DRAM_BA    <= "00";
-            DRAM_ADDR  <= "00" & '1' & C_ADDR_IN(9 downto 0); -- Column with A10=1
+            DRAM_ADDR  <= "001000000" & C_ADDR_IN(9 downto 6); -- Column with A10=1 extended to 13 bits
             seq_counter <= seq_counter + 1;
-					<= 	 + 1;
+            refresh_counter <= refresh_counter + 1;
           elsif seq_counter < 10 then
             -- Wait until CAS latency (data available at seq_counter=10)
             DRAM_CS_N  <= '0';
@@ -273,7 +273,7 @@ begin
             DRAM_CAS_N <= '1';
             DRAM_WE_N  <= '1';
             seq_counter <= seq_counter + 1;
-					<= 	 + 1;
+            refresh_counter <= refresh_counter + 1;
           if seq_counter = 10 then
               data_reg <= DRAM_DQ; -- Latch data after CAS latency (3 cycles)
             end if;
@@ -285,13 +285,12 @@ begin
               DRAM_CAS_N <= '1';
               DRAM_WE_N  <= '1';
               seq_counter <= seq_counter + 1;
-						<= 	 + 1;
+              refresh_counter <= refresh_counter + 1;
             else
               state <= IDLE;
               seq_counter <= 0;
             end if;
           end if;
-
       end case;
     end if;
   end process;
