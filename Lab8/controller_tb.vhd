@@ -6,7 +6,7 @@ entity tb_SDRAM_CTRL is
 end tb_SDRAM_CTRL;
 
 architecture Behavioral of tb_SDRAM_CTRL is
-    -- Declare signals for DUT ports
+    -- Sinais para as portas do DUT
     signal SYS_CLK    : std_logic := '0';
     signal C_ADDR_IN  : std_logic_vector(14 downto 0) := (others => '0');
     signal C_DATA_OUT : std_logic_vector(15 downto 0);
@@ -26,17 +26,20 @@ architecture Behavioral of tb_SDRAM_CTRL is
     signal DRAM_RAS_N : std_logic;
     signal DRAM_CS_N  : std_logic;
 
-    -- Clock period (approx 7 ns for 143 MHz)
+    -- Período do clock (aproximadamente 7 ns para 143 MHz)
     constant CLK_PERIOD : time := 7 ns;
 
-    -- Signals for simple SDRAM model
+    -- Sinais para o modelo simples de SDRAM
     signal read_cmd_detected : std_logic := '0';
     signal read_delay1       : std_logic := '0';
     signal read_delay2       : std_logic := '0';
     signal read_delay3       : std_logic := '0';
 
+    -- Dados de teste
+    signal test_data_write : std_logic_vector(15 downto 0) := "1010101010101010";
+
 begin
-    -- Instantiate the Device Under Test (DUT)
+    -- Instanciação do Device Under Test (DUT)
     DUT : entity work.SDRAM_CTRL
         port map (
             SYS_CLK    => SYS_CLK,
@@ -59,10 +62,10 @@ begin
             DRAM_CS_N  => DRAM_CS_N
         );
 
-    -- Clock generation
+    -- Geração do clock
     SYS_CLK <= not SYS_CLK after CLK_PERIOD / 2;
 
-    -- Simple SDRAM model: detect READ command and drive DRAM_DQ after CAS latency
+    -- Modelo simples de SDRAM: detecta comando de leitura e conduz DRAM_DQ após latência CAS
     process(SYS_CLK)
     begin
         if rising_edge(SYS_CLK) then
@@ -76,34 +79,34 @@ begin
         end if;
     end process;
 
-    -- Drive DRAM_DQ with test data after CAS latency of 3 cycles during read
-    DRAM_DQ <= "1111000011110000" when read_delay3 = '1' else (others => 'Z');
+    -- Conduz DRAM_DQ com os dados de teste após latência CAS de 3 ciclos durante a leitura
+    DRAM_DQ <= test_data_write when read_delay3 = '1' else (others => 'Z');
 
-    -- Stimulus process
+    -- Processo de estímulo
     process
     begin
-        -- Wait for initialization to complete (100 μs ≈ 14301 cycles, use 15000 for margin)
-        wait for 15000 * CLK_PERIOD;
+        -- Espera a inicialização completar (14311 ciclos)
+        wait for 14350 * CLK_PERIOD;
 
-        -- Write operation
-        C_ADDR_IN <= "000000000000001";  -- Example address
-        C_DATA_IN <= "1010101010101010"; -- Example data
+        -- Operação de escrita
+        C_ADDR_IN <= "000000000000001";  -- Endereço de exemplo
+        C_DATA_IN <= test_data_write;    -- Dados a serem escritos
         C_WRITE   <= '1';
         wait for CLK_PERIOD;
         C_WRITE   <= '0';
-        wait until C_READY = '1';        -- Wait for operation to complete
+        wait for 13 * CLK_PERIOD;        -- Espera a sequência de escrita completar (13 ciclos)
 
-        -- Read operation
-        C_ADDR_IN <= "000000000000001";  -- Same address
+        -- Operação de leitura
+        C_ADDR_IN <= "000000000000001";  -- Mesmo endereço
         C_READ    <= '1';
         wait for CLK_PERIOD;
         C_READ    <= '0';
-        wait until C_READY = '1';        -- Wait for operation to complete
+        wait for 12 * CLK_PERIOD;        -- Espera a sequência de leitura completar (12 ciclos)
 
-        -- Wait to observe refresh operations (refresh occurs every 1000 cycles in IDLE)
+        -- Espera para observar operações de refresh (ocorre a cada 1000 ciclos no estado IDLE)
         wait for 2000 * CLK_PERIOD;
 
-        -- End simulation
+        -- Fim da simulação
         wait;
     end process;
 

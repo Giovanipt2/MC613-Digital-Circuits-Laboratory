@@ -35,7 +35,7 @@ architecture Behavioral of SDRAM_CTRL is
 
   -- Counters
   signal counter        : integer range 0 to 14311 := 0; -- For INIT sequence
-  signal refresh_counter: integer range 0 to 1000 := 0; -- For periodic refresh
+  signal refresh_counter: integer range 0 to 2000 := 0; -- For periodic refresh
   signal seq_counter    : integer range 0 to 13   := 0; -- For READ/WRITE sequences
 
   -- Data register for read operations
@@ -48,8 +48,8 @@ begin
   DRAM_CKE <= '1'; -- Always high for normal operation
 
   -- Data mask signals
-  DRAM_LDQM <= '1' when state = INIT and counter < 14286 else '0';
-  DRAM_UDQM <= '1' when state = INIT and counter < 14286 else '0';
+  DRAM_LDQM <= '1' when state = INIT else '0';
+  DRAM_UDQM <= '1' when state = INIT else '0';
 
   -- Data bus control
   DRAM_DQ <= C_DATA_IN when write_enable = '1' else (others => 'Z');
