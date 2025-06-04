@@ -6,11 +6,12 @@ entity controller_board is
     port (
         -- Board Interface
         CLOCK_50  : in  std_logic;                      -- 50 MHz clock input
+        -- OBS: When passing the address, SW[9:6] is used for column address, and SW[5:0] for row address
         SW        : in  std_logic_vector(9 downto 0);   -- Switch input for address and data
         KEY       : in  std_logic_vector(3 downto 0);   -- Key input (active low)
-        HEX5      : out std_logic_vector(6 downto 0);   -- 7-segment display for address (bits 9-8)
+        HEX5      : out std_logic_vector(6 downto 0);   -- 7-segment display for address (bits 11-8)
         HEX4      : out std_logic_vector(6 downto 0);   -- 7-segment display for address (bits 7-4)
-        HEX3      : out std_logic_vector(6 downto 0);   -- 7-segment display for data (bits 15-12)
+        HEX3      : out std_logic_vector(6 downto 0);   -- 7-segment display for data (bits 3-0)
         HEX2      : out std_logic_vector(6 downto 0);   -- 7-segment display for data (bits 11-8)
         HEX1      : out std_logic_vector(6 downto 0);   -- 7-segment display for data (bits 7-4)
         HEX0      : out std_logic_vector(6 downto 0);   -- 7-segment display for data (bits 3-0)
@@ -43,11 +44,6 @@ architecture behavior of controller_board is
 
     -- SDRAM Controller component
     component SDRAM_CTRL
-      generic (
-        MEM_SIZE     : integer := 64;
-        DATA_WIDTH   : integer := 32;
-        ADDR_WIDTH   : integer := 16
-      );
       port (
         SYS_CLK    : in  std_logic;
         C_ADDR_IN  : in  std_logic_vector(14 downto 0);
@@ -133,13 +129,6 @@ begin
 
     -- Instantiate SDRAM Controller
     sdram_ctrl_inst : SDRAM_CTRL
-    generic map (
-        -- !!!!!!!!!! Não sei se isso está certo !!!!!!!!!!
-        MEM_SIZE   => 64, -- 512Mb = 64MB
-        DATA_WIDTH => 16, -- Device is x16
-        ADDR_WIDTH => 25  -- Corresponds to 32Mx16 (13 row + 10 col + 2 bank)
-                           -- The C_ADDR_IN is a logical CPU address the controller maps
-    )
     port map (
         SYS_CLK    => sdram_clk,
         C_ADDR_IN  => s_c_addr_in,
@@ -216,13 +205,16 @@ begin
 
             case current_op_state is
                 when S_IDLE =>
-                    -- Prioritize Write if KEY(2) is pressed
+                    -- If KEY(2) is pressed, initiate Write operation
                     if key2_pressed_edge = '1' then
                         disp_addr_val <= SW(9 downto 0); -- Show current SW as potential address
+                        disp_data_val <= "0000000000000000"; -- Clear data display
                         -- HEX displays could show "SETA" (Set Address) or similar indication
                         current_op_state <= S_WRITE_GET_ADDR;
+                    -- If KEY(3) is pressed, initiate Read operation
                     elsif key3_pressed_edge = '1' then
                         disp_addr_val <= SW(9 downto 0);
+                        disp_data_val <= "0000000000000000"; -- Clear data display
                         s_c_addr_in   <= "00000" & SW(9 downto 0); -- Use SW for lower 10 bits of address
                         s_c_read_cmd  <= '1';
                         current_op_state <= S_READ_ASSERT_CMD;
@@ -246,12 +238,9 @@ begin
                 when S_WRITE_GET_ADDR =>
                     -- User sets address on SW, presses KEY(2) to confirm
                     disp_addr_val <= SW(9 downto 0); -- Continuously display SW for address
-                    -- HEX displays could show "SETA" indication
                     if key2_pressed_edge = '1' then
                         temp_write_addr <= SW(9 downto 0);
                         disp_addr_val   <= SW(9 downto 0); -- Freeze displayed address
-                        -- HEX displays could show "SETd" (Set Data) indication
-                        disp_data_val   <= "000000" & SW(9 downto 0); -- Show SW as potential data
                         current_op_state <= S_WRITE_GET_DATA;
                     end if;
                      -- If KEY(3) is pressed during write setup, ignore it (as per requirement)
@@ -283,19 +272,17 @@ begin
     end process;
 
     -- 7-Segment Display Logic
-    -- Displaying 10-bit address (disp_addr_val) on HEX5 and HEX4:
-    -- HEX5: disp_addr_val(9 downto 8) (e.g., "00" & bits)
-    -- HEX4: disp_addr_val(7 downto 4)
+    -- Displaying 10-bit address (disp_addr_val) on HEX5-HEX3
     hex5_inst : unsigned_to_7seg
     port map (bin => "00" & disp_addr_val(9 downto 8), segs => HEX5);
 
     hex4_inst : unsigned_to_7seg
     port map (bin => disp_addr_val(7 downto 4), segs => HEX4);
 
-    -- Displaying 16-bit data (disp_data_val) on HEX3, HEX2, HEX1, HEX0
     hex3_inst : unsigned_to_7seg
-    port map (bin => disp_data_val(15 downto 12), segs => HEX3);
+    port map (bin => disp_addr_val(3 downto 0), segs => HEX3);
 
+    -- Displaying 16-bit data (disp_data_val) on HEX2-HEX0
     hex2_inst : unsigned_to_7seg
     port map (bin => disp_data_val(11 downto 8), segs => HEX2);
 
