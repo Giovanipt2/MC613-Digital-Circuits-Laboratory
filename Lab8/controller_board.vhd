@@ -4,32 +4,70 @@ use ieee.numeric_std.all;
 
 entity controller_board is
     port (
+        -- Board Interface
         CLOCK_50  : in  std_logic;                      -- 50 MHz clock input
         SW        : in  std_logic_vector(9 downto 0);   -- Switch input for address and data
         KEY       : in  std_logic_vector(3 downto 0);   -- Key input (active low)
-        HEX5      : out std_logic_vector(6 downto 0);   -- 7-segment display for address (high nibble)
-        HEX4      : out std_logic_vector(6 downto 0);   -- 7-segment display for address (low nibble)
-        HEX3      : out std_logic_vector(6 downto 0);   -- 7-segment display for data (nibble 3)
-        HEX2      : out std_logic_vector(6 downto 0);   -- 7-segment display for data (nibble 2)
-        HEX1      : out std_logic_vector(6 downto 0);   -- 7-segment display for data (nibble 1)
-        HEX0      : out std_logic_vector(6 downto 0);   -- 7-segment display for data (nibble 0)
-        -- SDRAM Controller Interface (example signals, adjust as per your controller)
-        C_ADDR_IN : out std_logic_vector(14 downto 0);  -- SDRAM address (assuming 15-bit address)
-        C_DATA_IN : out std_logic_vector(15 downto 0);  -- SDRAM data input
-        C_DATA_OUT: in  std_logic_vector(15 downto 0);  -- SDRAM data output
-        C_WRITE   : out std_logic;                      -- Write request
-        C_READ    : out std_logic;                      -- Read request
-        C_READY   : in  std_logic                       -- SDRAM controller ready signal
+        HEX5      : out std_logic_vector(6 downto 0);   -- 7-segment display for address (bits 9-8)
+        HEX4      : out std_logic_vector(6 downto 0);   -- 7-segment display for address (bits 7-4)
+        HEX3      : out std_logic_vector(6 downto 0);   -- 7-segment display for data (bits 15-12)
+        HEX2      : out std_logic_vector(6 downto 0);   -- 7-segment display for data (bits 11-8)
+        HEX1      : out std_logic_vector(6 downto 0);   -- 7-segment display for data (bits 7-4)
+        HEX0      : out std_logic_vector(6 downto 0);   -- 7-segment display for data (bits 3-0)
+
+        -- SDRAM Physical Interface
+        DRAM_DQ    : inout std_logic_vector(15 downto 0);
+        DRAM_ADDR  : out   std_logic_vector(12 downto 0);
+        DRAM_BA    : out   std_logic_vector(1 downto 0);
+        DRAM_CLK   : out   std_logic;
+        DRAM_CKE   : out   std_logic;
+        DRAM_LDQM  : out   std_logic;
+        DRAM_UDQM  : out   std_logic;
+        DRAM_WE_N  : out   std_logic;
+        DRAM_CAS_N : out   std_logic;
+        DRAM_RAS_N : out   std_logic;
+        DRAM_CS_N  : out   std_logic
     );
 end entity controller_board;
 
 architecture behavior of controller_board is
-    -- PLL component declaration (generated via Quartus IP Catalog)
-    component altpll
+
+    -- PLL component declaration (Generated via Quartus IP Catalog)
+    -- Input: 50MHz, Output: 143MHz
+    component altpll_sdram_clk
         port (
-            inclk0 : in  std_logic := '0';   -- 50 MHz input clock
-            c0     : out std_logic           -- 143 MHz output clock for SDRAM
+            inclk0 : in  std_logic := '0'; -- Input clock (50 MHz)
+            c0     : out std_logic        -- Output clock (143 MHz for SDRAM)
         );
+    end component;
+
+    -- SDRAM Controller component
+    component SDRAM_CTRL
+      generic (
+        MEM_SIZE     : integer := 64;
+        DATA_WIDTH   : integer := 32;
+        ADDR_WIDTH   : integer := 16
+      );
+      port (
+        SYS_CLK    : in  std_logic;
+        C_ADDR_IN  : in  std_logic_vector(14 downto 0);
+        C_DATA_OUT : out std_logic_vector(15 downto 0);
+        C_READY    : out std_logic;
+        C_DATA_IN  : in  std_logic_vector(15 downto 0);
+        C_WRITE    : in  std_logic;
+        C_READ     : in  std_logic;
+        DRAM_DQ    : inout std_logic_vector(15 downto 0);
+        DRAM_ADDR  : out   std_logic_vector(12 downto 0);
+        DRAM_BA    : out   std_logic_vector(1 downto 0);
+        DRAM_CLK   : out   std_logic;
+        DRAM_CKE   : out   std_logic;
+        DRAM_LDQM  : out   std_logic;
+        DRAM_UDQM  : out   std_logic;
+        DRAM_WE_N  : out   std_logic;
+        DRAM_CAS_N : out   std_logic;
+        DRAM_RAS_N : out   std_logic;
+        DRAM_CS_N  : out   std_logic
+      );
     end component;
 
     -- 7-segment display converter component
@@ -40,105 +78,231 @@ architecture behavior of controller_board is
         );
     end component;
 
-    -- State machine states for write operation
-    type write_state_t is (IDLE, SET_ADDR, SET_DATA, SEND_WRITE);
-    signal write_state : write_state_t := IDLE;
-
     -- Internal signals
-    signal sdram_clk    : std_logic;                     -- 143 MHz clock from PLL
-    signal addr_reg     : std_logic_vector(9 downto 0);  -- Registered address
-    signal data_reg     : std_logic_vector(15 downto 0); -- Registered data (16-bit)
-    signal read_data    : std_logic_vector(15 downto 0); -- Data read from SDRAM
-    signal key2_debounced, key3_debounced : std_logic;   -- Debounced button signals
-    signal key2_prev, key3_prev : std_logic := '1';      -- Previous button states
+    signal sdram_clk          : std_logic; -- 143 MHz clock from PLL
 
-    -- Debouncing signals
-    signal debounce_counter : integer range 0 to 500000 := 0; -- 10ms debounce at 50 MHz
-    constant DEBOUNCE_MAX : integer := 500000;
+    -- Debouncing and Edge Detection
+    signal key2_async         : std_logic;
+    signal key3_async         : std_logic;
+    signal key2_debounced     : std_logic := '1';
+    signal key3_debounced     : std_logic := '1';
+    signal key2_prev_deb      : std_logic := '1';
+    signal key3_prev_deb      : std_logic := '1';
+    signal key2_pressed_edge  : std_logic; -- Falling edge
+    signal key3_pressed_edge  : std_logic; -- Falling edge
+    signal debounce_counter_k2: integer range 0 to 500000 := 0; -- ~10ms debounce at 50MHz
+    signal debounce_counter_k3: integer range 0 to 500000 := 0;
+    constant DEBOUNCE_MAX     : integer := 500000; -- for 50MHz clock (10ms)
+
+    -- State machine for operations
+    type op_state_t is (
+        S_IDLE,
+        S_READ_ASSERT_CMD, S_READ_WAIT_SDRAM,
+        S_WRITE_GET_ADDR, S_WRITE_GET_DATA, S_WRITE_ASSERT_CMD, S_WRITE_WAIT_SDRAM
+    );
+    signal current_op_state : op_state_t := S_IDLE;
+
+    -- Signals for SDRAM Controller interface
+    signal s_c_addr_in        : std_logic_vector(14 downto 0);
+    signal s_c_data_in        : std_logic_vector(15 downto 0);
+    signal s_c_write_cmd      : std_logic := '0';
+    signal s_c_read_cmd       : std_logic := '0';
+    signal s_c_data_out_raw   : std_logic_vector(15 downto 0); -- from SDRAM_CTRL (sdram_clk domain)
+    signal s_c_ready_raw      : std_logic;                     -- from SDRAM_CTRL (sdram_clk domain)
+
+    -- Signals synchronized to CLOCK_50 domain
+    signal s_c_data_out_clk50 : std_logic_vector(15 downto 0);
+    signal s_c_ready_clk50_s1 : std_logic;
+    signal s_c_ready_clk50_s2 : std_logic; -- Synchronized C_READY
+
+    -- Registers for display values
+    signal disp_addr_val      : std_logic_vector(9 downto 0)  := (others => '0');
+    signal disp_data_val      : std_logic_vector(15 downto 0) := (others => '0');
+
+    -- Temporary storage for write operation
+    signal temp_write_addr    : std_logic_vector(9 downto 0);
 
 begin
+
     -- Instantiate PLL for SDRAM clock (143 MHz)
-    pll_inst : altpll
+    pll_inst : altpll_sdram_clk
     port map (
         inclk0 => CLOCK_50,
         c0     => sdram_clk
     );
 
-    -- Instantiate 7-segment converters
+    -- Instantiate SDRAM Controller
+    sdram_ctrl_inst : SDRAM_CTRL
+    generic map (
+        -- !!!!!!!!!! Não sei se isso está certo !!!!!!!!!!
+        MEM_SIZE   => 64, -- 512Mb = 64MB
+        DATA_WIDTH => 16, -- Device is x16
+        ADDR_WIDTH => 25  -- Corresponds to 32Mx16 (13 row + 10 col + 2 bank)
+                           -- The C_ADDR_IN is a logical CPU address the controller maps
+    )
+    port map (
+        SYS_CLK    => sdram_clk,
+        C_ADDR_IN  => s_c_addr_in,
+        C_DATA_OUT => s_c_data_out_raw,
+        C_READY    => s_c_ready_raw,
+        C_DATA_IN  => s_c_data_in,
+        C_WRITE    => s_c_write_cmd,
+        C_READ     => s_c_read_cmd,
+        DRAM_DQ    => DRAM_DQ,
+        DRAM_ADDR  => DRAM_ADDR,
+        DRAM_BA    => DRAM_BA,
+        DRAM_CLK   => DRAM_CLK,
+        DRAM_CKE   => DRAM_CKE,
+        DRAM_LDQM  => DRAM_LDQM,
+        DRAM_UDQM  => DRAM_UDQM,
+        DRAM_WE_N  => DRAM_WE_N,
+        DRAM_CAS_N => DRAM_CAS_N,
+        DRAM_RAS_N => DRAM_RAS_N,
+        DRAM_CS_N  => DRAM_CS_N
+    );
+
+    -- Debouncing and Edge Detection for KEY(2) and KEY(3)
+    -- Keys are active low
+    key2_async <= KEY(2);
+    key3_async <= KEY(3);
+
+    debounce_edge_proc : process(CLOCK_50)
+    begin
+        if rising_edge(CLOCK_50) then
+            -- Debounce KEY(2)
+            if key2_async /= key2_prev_deb then -- if changed
+                debounce_counter_k2 <= 0;
+            elsif debounce_counter_k2 < DEBOUNCE_MAX then
+                debounce_counter_k2 <= debounce_counter_k2 + 1;
+            else -- stable for DEBOUNCE_MAX cycles
+                key2_debounced <= key2_async;
+            end if;
+            key2_pressed_edge <= key2_prev_deb and not key2_debounced; -- Falling edge
+            key2_prev_deb <= key2_debounced;
+
+            -- Debounce KEY(3)
+            if key3_async /= key3_prev_deb then
+                debounce_counter_k3 <= 0;
+            elsif debounce_counter_k3 < DEBOUNCE_MAX then
+                debounce_counter_k3 <= debounce_counter_k3 + 1;
+            else
+                key3_debounced <= key3_async;
+            end if;
+            key3_pressed_edge <= key3_prev_deb and not key3_debounced; -- Falling edge
+            key3_prev_deb <= key3_debounced;
+        end if;
+    end process;
+
+    -- Clock Domain Crossing: Synchronize C_READY and register C_DATA_OUT
+    cdc_proc : process(CLOCK_50)
+    begin
+        if rising_edge(CLOCK_50) then
+            -- Synchronize C_READY (from sdram_clk domain to CLOCK_50 domain)
+            s_c_ready_clk50_s1 <= s_c_ready_raw;
+            s_c_ready_clk50_s2 <= s_c_ready_clk50_s1;
+
+            -- Register C_DATA_OUT (from sdram_clk domain to CLOCK_50 domain)
+            s_c_data_out_clk50 <= s_c_data_out_raw;
+        end if;
+    end process;
+
+    -- Main Control FSM (driven by CLOCK_50)
+    control_fsm_proc : process(CLOCK_50)
+    begin
+        if rising_edge(CLOCK_50) then
+            -- Default command values
+            s_c_read_cmd  <= '0';
+            s_c_write_cmd <= '0';
+
+            case current_op_state is
+                when S_IDLE =>
+                    -- Prioritize Write if KEY(2) is pressed
+                    if key2_pressed_edge = '1' then
+                        disp_addr_val <= SW(9 downto 0); -- Show current SW as potential address
+                        -- HEX displays could show "SETA" (Set Address) or similar indication
+                        current_op_state <= S_WRITE_GET_ADDR;
+                    elsif key3_pressed_edge = '1' then
+                        disp_addr_val <= SW(9 downto 0);
+                        s_c_addr_in   <= "00000" & SW(9 downto 0); -- Use SW for lower 10 bits of address
+                        s_c_read_cmd  <= '1';
+                        current_op_state <= S_READ_ASSERT_CMD;
+                    end if;
+
+                -- Read Operation States
+                when S_READ_ASSERT_CMD => -- Assert command for one cycle
+                    s_c_read_cmd <= '1'; -- Keep C_ADDR_IN stable
+                    current_op_state <= S_READ_WAIT_SDRAM;
+
+                when S_READ_WAIT_SDRAM =>
+                    -- Wait for SDRAM controller to become ready again
+                    -- C_READY goes low when busy, then high when done.
+                    if s_c_ready_clk50_s2 = '1' then
+                        disp_data_val <= s_c_data_out_clk50; -- Latch data
+                        current_op_state <= S_IDLE;
+                    end if;
+                    -- C_ADDR_IN is held by s_c_addr_in signal from S_IDLE transition
+
+                -- Write Operation States
+                when S_WRITE_GET_ADDR =>
+                    -- User sets address on SW, presses KEY(2) to confirm
+                    disp_addr_val <= SW(9 downto 0); -- Continuously display SW for address
+                    -- HEX displays could show "SETA" indication
+                    if key2_pressed_edge = '1' then
+                        temp_write_addr <= SW(9 downto 0);
+                        disp_addr_val   <= SW(9 downto 0); -- Freeze displayed address
+                        -- HEX displays could show "SETd" (Set Data) indication
+                        disp_data_val   <= "000000" & SW(9 downto 0); -- Show SW as potential data
+                        current_op_state <= S_WRITE_GET_DATA;
+                    end if;
+                     -- If KEY(3) is pressed during write setup, ignore it (as per requirement)
+
+                when S_WRITE_GET_DATA =>
+                    -- User sets data on SW, presses KEY(2) to confirm and send
+                    disp_data_val <= "000000" & SW(9 downto 0); -- Continuously display SW for data
+                    if key2_pressed_edge = '1' then
+                        s_c_addr_in   <= "00000" & temp_write_addr;
+                        s_c_data_in   <= "000000" & SW(9 downto 0);
+                        disp_data_val <= "000000" & SW(9 downto 0); -- Freeze displayed data
+                        s_c_write_cmd <= '1';
+                        current_op_state <= S_WRITE_ASSERT_CMD;
+                    end if;
+
+                when S_WRITE_ASSERT_CMD => -- Assert command for one cycle
+                    s_c_write_cmd <= '1'; -- Keep C_ADDR_IN and C_DATA_IN stable
+                    current_op_state <= S_WRITE_WAIT_SDRAM;
+
+                when S_WRITE_WAIT_SDRAM =>
+                    -- Wait for SDRAM controller to become ready again
+                    if s_c_ready_clk50_s2 = '1' then
+                        current_op_state <= S_IDLE;
+                    end if;
+                    -- C_ADDR_IN and C_DATA_IN are held by s_c_addr_in/s_c_data_in signals
+
+            end case;
+        end if;
+    end process;
+
+    -- 7-Segment Display Logic
+    -- Displaying 10-bit address (disp_addr_val) on HEX5 and HEX4:
+    -- HEX5: disp_addr_val(9 downto 8) (e.g., "00" & bits)
+    -- HEX4: disp_addr_val(7 downto 4)
     hex5_inst : unsigned_to_7seg
-    port map (bin => "00" & addr_reg(9 downto 8), segs => HEX5); -- High nibble of address
+    port map (bin => "00" & disp_addr_val(9 downto 8), segs => HEX5);
 
     hex4_inst : unsigned_to_7seg
-    port map (bin => addr_reg(7 downto 4), segs => HEX4);        -- Middle nibble of address
+    port map (bin => disp_addr_val(7 downto 4), segs => HEX4);
 
+    -- Displaying 16-bit data (disp_data_val) on HEX3, HEX2, HEX1, HEX0
     hex3_inst : unsigned_to_7seg
-    port map (bin => read_data(15 downto 12), segs => HEX3);     -- Data nibble 3
+    port map (bin => disp_data_val(15 downto 12), segs => HEX3);
 
     hex2_inst : unsigned_to_7seg
-    port map (bin => read_data(11 downto 8), segs => HEX2);      -- Data nibble 2
+    port map (bin => disp_data_val(11 downto 8), segs => HEX2);
 
     hex1_inst : unsigned_to_7seg
-    port map (bin => read_data(7 downto 4), segs => HEX1);       -- Data nibble 1
+    port map (bin => disp_data_val(7 downto 4), segs => HEX1);
 
     hex0_inst : unsigned_to_7seg
-    port map (bin => read_data(3 downto 0), segs => HEX0);       -- Data nibble 0
-
-    -- Button debouncing process
-    debounce_proc : process(CLOCK_50)
-    begin
-        if rising_edge(CLOCK_50) then
-            if KEY(2) /= key2_prev or KEY(3) /= key3_prev then
-                debounce_counter <= 0;
-            elsif debounce_counter < DEBOUNCE_MAX then
-                debounce_counter <= debounce_counter + 1;
-            else
-                key2_debounced <= KEY(2);
-                key3_debounced <= KEY(3);
-            end if;
-            key2_prev <= KEY(2);
-            key3_prev <= KEY(3);
-        end if;
-    end process;
-
-    -- Main control process
-    control_proc : process(CLOCK_50)
-    begin
-        if rising_edge(CLOCK_50) then
-            -- Default outputs
-            C_WRITE <= '0';
-            C_READ  <= '0';
-
-            -- Read operation (KEY(3))
-            if key3_debounced = '0' and write_state = IDLE then
-                addr_reg  <= SW(9 downto 0);
-                C_ADDR_IN <= "00000" & SW(9 downto 0); -- !!!!!!!!!!! Não esntendi direito pq C_ADDR_IN é 15 bits
-                C_READ    <= '1';
-                if C_READY = '1' then
-                    -- !!!!!!!!!! Pode ser que o C_DATA_OUT ainda nao esteja pronto                    
-                    read_data <= C_DATA_OUT;
-                end if;
-            end if;
-
-            -- Write operation state machine (KEY(2))
-            if key2_debounced = '0' and key2_prev = '1' then
-                case write_state is
-                    when IDLE =>
-                        write_state <= SET_ADDR;
-                    when SET_ADDR =>
-                        addr_reg    <= SW(9 downto 0);
-                        write_state <= SET_DATA;
-                    when SET_DATA =>
-                        data_reg    <= "000000" & SW(9 downto 0); -- Pad to 16 bits
-                        write_state <= SEND_WRITE;
-                    when SEND_WRITE =>
-                        C_ADDR_IN   <= "00000" & addr_reg;
-                        C_DATA_IN   <= data_reg;
-                        C_WRITE     <= '1';
-                        read_data   <= data_reg; -- Update display with written data
-                        write_state <= IDLE;
-                end case;
-            end if;
-        end if;
-    end process;
+    port map (bin => disp_data_val(3 downto 0), segs => HEX0);
 
 end architecture behavior;
