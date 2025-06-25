@@ -2,9 +2,10 @@ import os
 import time
 import numpy as np
 from PIL import Image
-import intel_jtag_uart
 import sys
-
+import glob
+os.environ['QUARTUS_ROOTDIR'] = '/opt/altera/17.1/quartus'
+import intel_jtag_uart
 
 def load_and_prepare_image(image_path: str, target_size: tuple[int, int] = (254, 254), 
                          padded_size: tuple[int, int] = (256, 256)) -> Image.Image:
@@ -82,37 +83,38 @@ def bytes_to_image(byte_data: bytes, size: tuple[int, int]) -> Image.Image:
 
 
 def main() -> None:
-    # Path to the test image
-    image_path = 'test_images/checkerboard_254x254.png'
+    # Initialize JTAG UART communication
+    print("Initializing JTAG UART...")
+    ju = intel_jtag_uart.intel_jtag_uart()
     
     # Target and padded sizes
     target_size = (254, 254)
     padded_size = (256, 256)
     
-    # Load and prepare the image
-    print(f"Loading and preparing image: {image_path}")
-    img = load_and_prepare_image(image_path, target_size=target_size, padded_size=padded_size)
-    
-    # Convert image to bytes
-    img_bytes = image_to_bytes(img)
-    print(f"Image converted to bytes ({len(img_bytes)} bytes)")
-    
-    try:
-        # Initialize JTAG UART communication
-        print("Initializing JTAG UART...")
-        ju = intel_jtag_uart.intel_jtag_uart()
-        
+    # Iterates over all PNGs in the test_images folder
+    for image_path in sorted(glob.glob('test_images/*.png')):
+        print(f"\n=== Testing {image_path} ===")
+
+        # Load and prepare the image
+        print(f"Loading and preparing image: {image_path}")
+        img = load_and_prepare_image(image_path, target_size=target_size, padded_size=padded_size)
+
+        # Convert image to bytes
+        img_bytes = image_to_bytes(img)
+        print(f"Image converted to bytes ({len(img_bytes)} bytes)")
+
         # Send image to FPGA
         print("Sending image to FPGA...")
-        ju.write(img_bytes)
+        for b in img_bytes:
+            ju.write(bytes([b]))
         
         # Wait for processing
         print("Waiting for FPGA processing...")
-        time.sleep(10)  # Adjust based on actual processing time
+        time.sleep(10)
         
         # Receive processed image
         print("Receiving processed image...")
-        expected_size = padded_size[0] * padded_size[1]
+        expected_size = padded_size[0] * padded_size[1]  # Total bytes expected (256 * 256)
         received_bytes = b""
         start_time = time.time()
         while len(received_bytes) < expected_size and time.time() - start_time < 20:
@@ -129,11 +131,12 @@ def main() -> None:
         # Display and save processed image
         print("Displaying processed image...")
         processed_img.show()
-        processed_img.save('test_images/processed_output.png')
         
-    except Exception as e:
-        print(f"Error during FPGA communication: {e}")
-        sys.exit(1)
+        # Extract only the file name (without directory or extension)
+        base = os.path.splitext(os.path.basename(image_path))[0]
+        # Constructs the output path in output/<name>.png
+        output_path = os.path.join('output', f'{base}.png')
+        processed_img.save(output_path)
 
 
 if __name__ == '__main__':

@@ -9,16 +9,16 @@ entity sobel_processor is
     );
     port (
         CLOCK_50 : in  std_logic;
-        LEDR     : out std_logic_vector(7 downto 0)
+        LEDR     : out std_logic_vector(9 downto 0)
     );
 end entity sobel_processor;
 
 architecture behavioral of sobel_processor is
-    -- Clock and Reset 
+    -- Clock and Reset
     signal clk   : std_logic := '0';
     signal reset : std_logic := '0';  
 
-    -- Avalon-MM signals to the JTAG UART 
+    -- Avalon-MM signals to the JTAG UART
     signal jtag_uart_cs          : std_logic := '1';  -- Always active
     signal jtag_uart_waitrequest : std_logic;         -- Indicates request in processing
     signal jtag_uart_addr        : std_logic := '0';  -- 0 = data, 1 = control
@@ -32,7 +32,7 @@ architecture behavioral of sobel_processor is
     signal uart_rx_valid : std_logic;
     signal uart_rx_avail : std_logic_vector(15 downto 0);
 
-    -- UART writing 
+    -- UART writing
     signal data_to_write : std_logic := '0';  
 
     -- States definition
@@ -47,7 +47,7 @@ architecture behavioral of sobel_processor is
     signal first_lines_received : std_logic := '0';  -- Flag to indicate if the first 3 lines have been received
 
     -- Signals for square root calculation
-    signal sqrt_addr  : std_logic_vector(17 downto 0);
+    signal sqrt_addr  : std_logic_vector(15 downto 0);
     signal sqrt_value : std_logic_vector(7 downto 0);
 
     -- Buffer lines to process 3 lines at a time
@@ -61,12 +61,7 @@ begin
     -- Clock assignment
     clk <= CLOCK_50;
 
-    -- Square root table instantiation
-    sqrt_table_inst: entity work.sqrt_table
-        port map (
-            addr     => sqrt_addr,
-            sqrt_out => sqrt_value
-        );
+    LEDR(9 downto 8) <= "00";  -- Unused LEDs
 
     -- Instantiate the JTAG UART module following the generated _inst file
     jtag_uart_inst: entity work.jtag_uart
@@ -79,8 +74,15 @@ begin
             av_readdata     => jtag_uart_readdata,
             av_write_n      => not jtag_uart_write,
             av_writedata    => jtag_uart_writedata,
-            av_waitrequest  => jtag_uart_waitrequest,
-            irq_irq         => open
+            av_waitrequest  => jtag_uart_waitrequest
+        );
+ 
+-- Square root table instantiation
+    sqrt_rom_inst: entity work.sqrt_rom
+        port map (
+            address  => sqrt_addr,
+            clock    => clk,
+q      => sqrt_value
         );
 
     -- Main process to handle the Sobel processing
@@ -100,18 +102,19 @@ begin
             jtag_uart_read <= '0';
             jtag_uart_write <= '0';
             jtag_uart_writedata <= (others => '0');
-            LEDR <= (others => '0');
+            LEDR(7 downto 0) <= (others => '0');
+reset <= '0';
 
         elsif rising_edge(clk) then
             case state is
                 when IDLE =>
-                    if uart_rx_avail /= "0000000000000000" then
+                    if jtag_uart_readdata(31 downto 16) /= "0000000000000000" then
                         state <= RECEIVE_IMAGE;
                     end if;
 
                 when RECEIVE_IMAGE =>
                     if jtag_uart_read = '0' then
-                        if uart_rx_avail /= "0000000000000000" then
+                        if jtag_uart_readdata(31 downto 16) /= "0000000000000000" then
                             jtag_uart_read <= '1';
                         -- If there is no data available and it has not finished reading the line, it returns to IDLE
                         elsif pixel_counter < IMAGE_WIDTH then
@@ -122,7 +125,7 @@ begin
                         uart_rx_valid <= jtag_uart_readdata(15);
                         uart_rx_avail <= jtag_uart_readdata(31 downto 16);
                         if uart_rx_valid = '1' then
-                            LEDR <= uart_rx_data;   -- Display the received data on LEDs
+                            LEDR(7 downto 0) <= uart_rx_data;   -- Display the received data on LEDs
                             if first_lines_received = '0' then
                                 -- Read the first three lines
                                 if line_counter = 0 then
@@ -187,7 +190,7 @@ begin
                     if G_squared > 65025 then
                         G_squared := 65025;
                     end if;
-                    sqrt_addr <= std_logic_vector(to_unsigned(G_squared, 18));
+                    sqrt_addr <= std_logic_vector(to_unsigned(G_squared, 16));
                     output_line_buffer(x_pos) <= sqrt_value;
 
                     -- Updates the position
@@ -215,6 +218,7 @@ begin
                             if y_pos < IMAGE_HEIGHT - 1 then
                                 state <= RECEIVE_IMAGE;     -- Receives the next line
                             else
+    reset <= '1';
                                 state <= IDLE;              -- All processing is done
                             end if;
                         end if;
